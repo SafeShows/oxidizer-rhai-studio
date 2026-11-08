@@ -104,6 +104,9 @@ impl Mod for Studio {
             // Title: centered, over a line across the window, like the game's dialogs.
             gfx::draw_text(v2(pos.x + (size.x - gfx::text_width(TITLE)) / 2.0, pos.y + 9.0), theme::TEXT, TITLE);
             gfx::draw_line(v2(pos.x, pos.y + TITLE_HEIGHT), v2(pos.x + size.x, pos.y + TITLE_HEIGHT), theme::LINE);
+            // Close: hides the window; Mods > Rhai Studio (or F9) opens it again, with its tabs as they were.
+            gfx::set_cursor_pos(v2(pos.x + size.x - 34.0, pos.y + 5.0));
+            let close = theme::close_button(v2(26.0, 24.0));
             gfx::set_cursor_pos(v2(pos.x + 12.0, pos.y + TITLE_HEIGHT + 10.0));
 
             let body = gfx::avail().y - self.drawer - FOOTER_HEIGHT;
@@ -118,6 +121,9 @@ impl Mod for Studio {
                 self.console.draw(self.drawer - 40.0);
             }
             self.draw_footer(pos, size);
+            if close {
+                self.toggle();
+            }
         }
         imgui::end();
         theme::pop();

@@ -82,6 +82,22 @@ pub fn primary_button(label: &str, size: gfx::V2) -> bool {
     clicked
 }
 
+/// A frameless "×" button, for closing a window from its title area.
+pub fn close_button(size: gfx::V2) -> bool {
+    gfx::push_color(21, CLEAR);
+    gfx::push_color(22, SECTION);
+    gfx::push_color(23, SECTION_HOVER);
+    gfx::push_color(5, CLEAR);
+    let at = gfx::cursor_pos();
+    let clicked = gfx::button_sized("##close", size);
+    gfx::pop_colors(4);
+    // The × drawn as two lines: the font's own × is tiny.
+    let (c, r) = (gfx::v2(at.x + size.x / 2.0, at.y + size.y / 2.0), 5.0);
+    gfx::draw_line(gfx::v2(c.x - r, c.y - r), gfx::v2(c.x + r, c.y + r), TEXT);
+    gfx::draw_line(gfx::v2(c.x - r, c.y + r), gfx::v2(c.x + r, c.y - r), TEXT);
+    clicked
+}
+
 /// An outlined button that looks pressed (lit border and text) when `on`.
 pub fn toggle_button(label: &str, on: bool, size: gfx::V2) -> bool {
     if on {

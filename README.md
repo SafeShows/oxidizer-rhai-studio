@@ -15,7 +15,8 @@ and Oxidizer reloads the mod within a second, while you keep flying.
   line), with the log as it comes in (your `print()` output too) and a line that runs Rhai against
   the live game: `ksa::Program::controlled_vehicle().id`, `let v = ...` and then `v.get_surface_speed()`.
 
-**F9** opens and closes Rhai Studio; it is in the game's **Mods** menu too.
+**F9** or **Mods > Rhai Studio** opens and closes Rhai Studio, and the × in its corner closes it. Closed, it is gone
+until you open it again, with your tabs as you left them.
 
 ## Install
 
