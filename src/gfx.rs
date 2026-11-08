@@ -46,6 +46,16 @@ struct Fns {
     window_pos: unsafe extern "C" fn() -> V2,
     button: unsafe extern "C" fn(S, *const V2) -> bool,
     add_line: unsafe extern "C" fn(DrawList, *const V2, *const V2, u32, f32),
+    input_text_multiline: unsafe extern "C" fn(S, *mut u8, usize, *const V2, i32, Option<TextCallback>, *mut c_void) -> bool,
+    cb_insert: unsafe extern "C" fn(*mut TextEdit, i32, S, S),
+    cb_delete: unsafe extern "C" fn(*mut TextEdit, i32, i32),
+    is_key_pressed: unsafe extern "C" fn(i32, bool) -> bool,
+    set_next_window_pos: unsafe extern "C" fn(*const V2, i32, *const V2),
+    begin_tooltip: unsafe extern "C" fn() -> bool,
+    end_tooltip: unsafe extern "C" fn(),
+    text_unformatted: unsafe extern "C" fn(S, S),
+    push_text_wrap_pos: unsafe extern "C" fn(f32),
+    pop_text_wrap_pos: unsafe extern "C" fn(),
 }
 
 fn fns() -> &'static Fns {
@@ -82,6 +92,16 @@ fn fns() -> &'static Fns {
             window_pos: sym!("GetWindowPos"),
             button: sym!("Button"),
             add_line: sym!("ImDrawList_AddLine"),
+            input_text_multiline: sym!("InputTextMultiline"),
+            cb_insert: sym!("ImGuiInputTextCallbackData_InsertChars"),
+            cb_delete: sym!("ImGuiInputTextCallbackData_DeleteChars"),
+            is_key_pressed: sym!("IsKeyPressed"),
+            set_next_window_pos: sym!("SetNextWindowPos"),
+            begin_tooltip: sym!("BeginTooltip"),
+            end_tooltip: sym!("EndTooltip"),
+            text_unformatted: sym!("TextUnformatted"),
+            push_text_wrap_pos: sym!("PushTextWrapPos"),
+            pop_text_wrap_pos: sym!("PopTextWrapPos"),
         };
         std::mem::forget(lib);
         f
@@ -223,3 +243,87 @@ pub fn button_sized(label: &str, size: V2) -> bool {
 pub fn draw_line(a: V2, b: V2, color: [f32; 4]) {
     unsafe { (fns().add_line)((fns().get_window_draw_list)(), &a, &b, rgba(color), 1.0) }
 }
+
+/// ImGui's ImGuiInputTextCallbackData (1.92): what a text box's callback sees and may change.
+#[repr(C)]
+pub struct TextEdit {
+    _ctx: *mut c_void,
+    _event_flag: i32,
+    _flags: i32,
+    pub user_data: *mut c_void,
+    _event_char: u32, // ImWchar, padded to 4 bytes either way
+    _event_key: i32,
+    pub buf: *mut u8,
+    pub buf_text_len: i32,
+    pub buf_size: i32,
+    _buf_dirty: bool,
+    pub cursor_pos: i32,
+    pub selection_start: i32,
+    pub selection_end: i32,
+}
+
+pub type TextCallback = extern "C" fn(*mut TextEdit) -> i32;
+
+impl TextEdit {
+    pub fn text(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.buf, self.buf_text_len.max(0) as usize) }
+    }
+
+    /// Replaces `len` bytes at `at` with `s` and puts the cursor after it.
+    pub fn replace(&mut self, at: usize, len: usize, s: &str) {
+        let p = s.as_ptr() as S;
+        unsafe {
+            (fns().cb_delete)(self, at as i32, len as i32);
+            (fns().cb_insert)(self, at as i32, p, p.add(s.len()));
+        }
+        self.set_cursor(at + s.len());
+    }
+
+    pub fn set_cursor(&mut self, at: usize) {
+        self.cursor_pos = at as i32;
+        self.selection_start = at as i32;
+        self.selection_end = at as i32;
+    }
+}
+
+pub const INPUT_CALLBACK_ALWAYS: i32 = 1 << 20;
+
+/// A multi-line text box over `buf` (text, then a 0, then room), with a callback that runs every frame while it
+/// is active; `user` reaches the callback as `user_data`.
+pub fn input_text_multiline(id: &str, buf: &mut [u8], size: V2, flags: i32, cb: TextCallback, user: *mut c_void) -> bool {
+    unsafe { (fns().input_text_multiline)(c(id).as_ptr(), buf.as_mut_ptr(), buf.len(), &size, flags, Some(cb), user) }
+}
+
+// ImGuiKey values of the game's ImGui.
+pub const KEY_TAB: i32 = 512;
+pub const KEY_UP: i32 = 515;
+pub const KEY_DOWN: i32 = 516;
+pub const KEY_ENTER: i32 = 525;
+
+/// True on the frame the key went down (and on repeats), also while typing in a text box.
+pub fn key_pressed(key: i32) -> bool {
+    unsafe { (fns().is_key_pressed)(key, true) }
+}
+
+/// A tooltip window at `pos` (screen position), on top of everything. Call [`end_tooltip`] when this returns true.
+pub fn begin_tooltip_at(pos: V2) -> bool {
+    unsafe {
+        (fns().set_next_window_pos)(&pos, 1, &V2::default());
+        (fns().begin_tooltip)()
+    }
+}
+
+pub fn end_tooltip() {
+    unsafe { (fns().end_tooltip)() }
+}
+
+/// Text that wraps at the window's edge.
+pub fn text_wrapped(s: &str) {
+    let p = s.as_ptr() as S;
+    unsafe {
+        (fns().push_text_wrap_pos)(0.0);
+        (fns().text_unformatted)(p, p.add(s.len()));
+        (fns().pop_text_wrap_pos)();
+    }
+}
+

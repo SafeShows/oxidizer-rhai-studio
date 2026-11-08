@@ -1,6 +1,7 @@
 //! The Rhai mods in the game's mods folder, open documents, and making a new mod.
 
-use oxidizer_api::{imgui::TextBuffer, mods_dir};
+use crate::editor::Code;
+use oxidizer_api::mods_dir;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -48,7 +49,7 @@ pub struct Doc {
     pub mod_id: String,
     /// "mod/file.rhai", unique per file (tab labels need that).
     pub title: String,
-    pub text: TextBuffer,
+    pub text: Code,
     /// The text as it is on disk.
     saved: String,
     on_disk: Option<SystemTime>,
@@ -62,7 +63,7 @@ impl Doc {
             path: path.to_path_buf(),
             mod_id: mod_id.into(),
             title: format!("{mod_id}/{file}"),
-            text: TextBuffer::default(),
+            text: Code::default(),
             saved: String::new(),
             on_disk: None,
             error: None,

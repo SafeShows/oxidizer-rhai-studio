@@ -2,21 +2,25 @@
 //! Oxidizer reloads them within a second, make new mods, and try code in a console against the live game.
 //! An Oxidizer mod in Rust: https://docs.rs/oxidizer_api
 //!
-//! - editor.rs: the code editor with syntax colors (highlight.rs colors Rhai)
+//! - editor.rs: the code editor with syntax colors (highlight.rs colors Rhai) and autocomplete
+//! - api.rs: what scripts can call, from Oxidizer's definition files; explorer.rs: the API panel
 //! - files.rs: finding Rhai mods, open documents, new mods
 //! - console.rs: the log and the console line
 //! - theme.rs: the look of the game's own dialogs
 //! - gfx.rs: ImGui drawing the API doesn't wrap
 //! - this file: the window
 
+mod api;
 mod console;
 mod editor;
+mod explorer;
 mod files;
 mod gfx;
 mod highlight;
 mod theme;
 
 use console::Console;
+use explorer::Explorer;
 use files::{Doc, RhaiMod};
 use gfx::v2;
 use oxidizer_api::imgui::{self, TextBuffer, tab_flags, text_flags};
@@ -29,6 +33,7 @@ const FOOTER_HEIGHT: f32 = 50.0;
 const SIDEBAR_WIDTH: f32 = 240.0;
 /// Height of the console drawer when open.
 const DRAWER_HEIGHT: f32 = 200.0;
+const EXPLORER_WIDTH: f32 = 360.0;
 
 struct Studio {
     visible: bool,
@@ -45,13 +50,17 @@ struct Studio {
     /// The console drawer: whether it is open, and its height now (it slides between 0 and DRAWER_HEIGHT).
     drawer_open: bool,
     drawer: f32,
+    /// The API panel on the right.
+    api_open: bool,
+    explorer: Explorer,
     frames: u64,
 }
 
 impl Mod for Studio {
     fn init() -> Self {
         log("rhai_studio: F9 opens Rhai Studio");
-        let (visible, drawer_open) = load_settings();
+        let (visible, drawer_open, api_open) = load_settings();
+        std::thread::spawn(api::load);
         Studio {
             visible,
             mods: files::rhai_mods(),
@@ -64,6 +73,8 @@ impl Mod for Studio {
             console: Console::new(),
             drawer_open,
             drawer: if drawer_open { DRAWER_HEIGHT } else { 0.0 },
+            api_open,
+            explorer: Explorer::default(),
             frames: 0,
         }
     }
@@ -114,9 +125,20 @@ impl Mod for Studio {
             self.draw_sidebar();
             gfx::end_child();
             imgui::same_line();
-            gfx::begin_child("rhai_studio_main", v2(0.0, body), 0, 0);
+            let main_width = if self.api_open { -(EXPLORER_WIDTH + 8.0) } else { 0.0 };
+            gfx::begin_child("rhai_studio_main", v2(main_width, body), 0, 0);
             self.draw_tabs();
             gfx::end_child();
+            if self.api_open {
+                imgui::same_line();
+                gfx::begin_child("rhai_studio_api", v2(0.0, body), 0, 0);
+                if let Some(code) = self.explorer.draw()
+                    && let Some(d) = self.active.and_then(|i| self.docs.get_mut(i))
+                {
+                    d.text.insert(&code);
+                }
+                gfx::end_child();
+            }
             if self.drawer > 40.0 {
                 self.console.draw(self.drawer - 40.0);
             }
@@ -142,7 +164,10 @@ impl Studio {
     }
 
     fn save_settings(&self) {
-        let _ = std::fs::write(config_path("rhai_studio"), format!("visible = {}\nconsole = {}\n", self.visible, self.drawer_open));
+        let _ = std::fs::write(
+            config_path("rhai_studio"),
+            format!("visible = {}\nconsole = {}\napi = {}\n", self.visible, self.drawer_open, self.api_open),
+        );
     }
 
     fn status(&self, id: &str) -> Option<&ModStatus> {
@@ -174,12 +199,17 @@ impl Studio {
             self.drawer_open = !self.drawer_open;
             self.save_settings();
         }
+        imgui::same_line();
+        if theme::toggle_button("API", self.api_open, v2(theme::button_width("API"), h)) {
+            self.api_open = !self.api_open;
+            self.save_settings();
+        }
         self.console.poll_log();
         if !self.drawer_open
             && let Some((color, line)) = self.console.last()
         {
             // Folded: the newest line, so nothing goes unseen.
-            gfx::draw_text(v2(pos.x + 24.0 + theme::button_width("CONSOLE"), y + 6.0), *color, line);
+            gfx::draw_text(v2(pos.x + 36.0 + theme::button_width("CONSOLE") + theme::button_width("API"), y + 6.0), *color, line);
         }
 
         let (save_w, revert_w) = (theme::button_width("SAVE") + 16.0, theme::button_width("REVERT"));
@@ -310,11 +340,11 @@ impl Studio {
     }
 }
 
-/// (window visible, console drawer open)
-fn load_settings() -> (bool, bool) {
+/// (window visible, console drawer open, API panel open)
+fn load_settings() -> (bool, bool, bool) {
     let t = std::fs::read_to_string(config_path("rhai_studio")).ok().and_then(|t| t.parse::<toml::Table>().ok()).unwrap_or_default();
     let flag = |k: &str, d: bool| t.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
-    (flag("visible", true), flag("console", true))
+    (flag("visible", true), flag("console", true), flag("api", false))
 }
 
 oxidizer_api::oxidizer_mod!(Studio);
