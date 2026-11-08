@@ -56,6 +56,9 @@ struct Fns {
     text_unformatted: unsafe extern "C" fn(S, S),
     push_text_wrap_pos: unsafe extern "C" fn(f32),
     pop_text_wrap_pos: unsafe extern "C" fn(),
+    mouse_pos: unsafe extern "C" fn() -> V2,
+    mouse_clicked: unsafe extern "C" fn(i32, bool) -> bool,
+    window_hovered: unsafe extern "C" fn(i32) -> bool,
 }
 
 fn fns() -> &'static Fns {
@@ -102,6 +105,9 @@ fn fns() -> &'static Fns {
             text_unformatted: sym!("TextUnformatted"),
             push_text_wrap_pos: sym!("PushTextWrapPos"),
             pop_text_wrap_pos: sym!("PopTextWrapPos"),
+            mouse_pos: sym!("GetMousePos"),
+            mouse_clicked: sym!("IsMouseClicked"),
+            window_hovered: sym!("IsWindowHovered"),
         };
         std::mem::forget(lib);
         f
@@ -327,3 +333,8 @@ pub fn text_wrapped(s: &str) {
     }
 }
 
+
+/// Where the mouse is (screen position), if the left button was clicked this frame over the current window.
+pub fn clicked_at() -> Option<V2> {
+    unsafe { ((fns().window_hovered)(0) && (fns().mouse_clicked)(0, false)).then(|| (fns().mouse_pos)()) }
+}

@@ -148,6 +148,9 @@ fn function(stack: &[String], f: &str, doc: String) -> Option<Item> {
     let open = f.find('(')?;
     let close = open + f[open..].find(')')?;
     let name = f[..open].trim().to_string();
+    if !name.starts_with(|c: char| c.is_alphabetic() || c == '_') {
+        return None; // an operator (`!`, `+`, ...)
+    }
     let mut ret = f[close + 1..].trim().trim_start_matches("->").trim();
     if ret.contains("EvalAltResult") {
         ret = ""; // Oxidizer functions that can throw: Rhai writes their result type garbled

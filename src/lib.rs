@@ -3,6 +3,7 @@
 //! An Oxidizer mod in Rust: https://docs.rs/oxidizer_api
 //!
 //! - editor.rs: the code editor with syntax colors (highlight.rs colors Rhai) and autocomplete
+//! - debug.rs: breakpoints and the DEBUG panel (Oxidizer pauses the mod)
 //! - api.rs: what scripts can call, from Oxidizer's definition files; explorer.rs: the API panel
 //! - files.rs: finding Rhai mods, open documents, new mods
 //! - console.rs: the log and the console line
@@ -12,6 +13,7 @@
 
 mod api;
 mod console;
+mod debug;
 mod editor;
 mod explorer;
 mod files;
@@ -53,6 +55,7 @@ struct Studio {
     /// The API panel on the right.
     api_open: bool,
     explorer: Explorer,
+    debug: debug::Debug,
     frames: u64,
 }
 
@@ -75,6 +78,7 @@ impl Mod for Studio {
             drawer: if drawer_open { DRAWER_HEIGHT } else { 0.0 },
             api_open,
             explorer: Explorer::default(),
+            debug: debug::Debug::default(),
             frames: 0,
         }
     }
@@ -102,6 +106,9 @@ impl Mod for Studio {
             return;
         }
         self.statuses = oxidizer_api::mod_statuses();
+        if !self.docs.is_empty() {
+            self.debug.poll(self.frames);
+        }
         let target = if self.drawer_open { DRAWER_HEIGHT } else { 0.0 };
         self.drawer += (target - self.drawer) * (dt as f32 * 14.0).min(1.0);
         if (target - self.drawer).abs() < 0.5 {
@@ -125,17 +132,39 @@ impl Mod for Studio {
             self.draw_sidebar();
             gfx::end_child();
             imgui::same_line();
-            let main_width = if self.api_open { -(EXPLORER_WIDTH + 8.0) } else { 0.0 };
+            // The right column: the DEBUG panel once a breakpoint was hit, the API explorer when open.
+            let debugging = self.debug.active() || self.debug.problem.is_some();
+            let side = self.api_open || debugging;
+            let main_width = if side { -(EXPLORER_WIDTH + 8.0) } else { 0.0 };
             gfx::begin_child("rhai_studio_main", v2(main_width, body), 0, 0);
             self.draw_tabs();
             gfx::end_child();
-            if self.api_open {
+            if side {
                 imgui::same_line();
-                gfx::begin_child("rhai_studio_api", v2(0.0, body), 0, 0);
-                if let Some(code) = self.explorer.draw()
-                    && let Some(d) = self.active.and_then(|i| self.docs.get_mut(i))
-                {
-                    d.text.insert(&code);
+                gfx::begin_child("rhai_studio_side_right", v2(0.0, body), 0, 0);
+                // Both: as tabs, DEBUG first (it opens when a breakpoint is hit).
+                let both = debugging && self.api_open;
+                let tabs = both && imgui::begin_tab_bar("rhai_studio_side_tabs");
+                if debugging && (!both || (tabs && imgui::begin_tab_item("DEBUG", None, 0))) {
+                    gfx::begin_child("rhai_studio_debug", v2(0.0, 0.0), gfx::CHILD_BORDERS, 0);
+                    self.debug.draw();
+                    gfx::end_child();
+                    if both {
+                        imgui::end_tab_item();
+                    }
+                }
+                if self.api_open && (!both || (tabs && imgui::begin_tab_item("API", None, 0))) {
+                    if let Some(code) = self.explorer.draw()
+                        && let Some(d) = self.active.and_then(|i| self.docs.get_mut(i))
+                    {
+                        d.text.insert(&code);
+                    }
+                    if both {
+                        imgui::end_tab_item();
+                    }
+                }
+                if tabs {
+                    imgui::end_tab_bar();
                 }
                 gfx::end_child();
             }
@@ -314,14 +343,17 @@ impl Studio {
         }
         if let Some(i) = close {
             // ponytail: closing a tab with unsaved edits drops them; ask first if people lose work this way.
-            self.docs.remove(i);
+            let d = self.docs.remove(i);
+            self.debug.clear(&d.title, &d.mod_id);
         }
     }
 
     fn draw_doc(&mut self, i: usize) {
         let status = self.status(&self.docs[i].mod_id).cloned();
         let d = &mut self.docs[i];
+        let paused = self.debug.paused_at(&d.title);
         let (color, state) = match &status {
+            _ if paused.is_some() => (theme::AMBER, "PAUSED AT A BREAKPOINT"),
             Some(s) if s.problem.is_some() => (RED, "ERROR"),
             Some(_) => (GREEN, "RUNNING"),
             None => (MUTED, "NOT LOADED"),
@@ -336,7 +368,11 @@ impl Studio {
         if let Some(p) = status.as_ref().and_then(|s| s.problem.as_deref()) {
             imgui::text_colored(RED, p);
         }
-        editor::code_editor("rhai_studio_editor", &mut d.text, v2(0.0, 0.0));
+        let breakpoints = self.debug.breakpoints(&d.title);
+        let marks = editor::Marks { breakpoints: &breakpoints, paused_at: self.debug.paused_at(&d.title) };
+        if let Some(line) = editor::code_editor("rhai_studio_editor", &mut d.text, v2(0.0, 0.0), &marks) {
+            self.debug.toggle(&d.title, line);
+        }
     }
 }
 

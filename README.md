@@ -15,6 +15,9 @@ and Oxidizer reloads the mod within a second, while you keep flying.
   the names your script defines, each with its signature and a line of docs. Up/Down choose, Tab or Enter insert.
 - **API explorer:** the API button opens a panel with everything a script can call: search it, open a module
   (`ksa::Universe::`) to see what is in it, read a function's signature and docs, and INSERT it into the script.
+- **Breakpoints:** click left of a line number to set one. When the mod reaches it, the DEBUG panel shows the
+  function's variables, `this` and the call stack, and the mod pauses while the game keeps running; CONTINUE runs
+  it again (in `frame`, one frame at a time). Needs Oxidizer 0.11 or later.
 - **Errors:** a mod that fails to load or stops on an error shows the error, with its line, above the editor.
 - **Console:** a drawer that slides up from the CONSOLE button under the editor (folded, the bar shows the newest
   line), with the log as it comes in (your `print()` output too) and a line that runs Rhai against

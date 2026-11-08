@@ -22,6 +22,10 @@ const LINE_NUMBER: [f32; 4] = [0.36, 0.40, 0.46, 1.0];
 const CURSOR: [f32; 4] = [1.0, 0.80, 0.30, 1.0];
 const SELECTION: [f32; 4] = [0.25, 0.45, 0.75, 0.45];
 const CLEAR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+const BREAKPOINT: [f32; 4] = [0.90, 0.30, 0.28, 1.0];
+const PAUSED_LINE: [f32; 4] = [0.95, 0.71, 0.24, 0.18];
+/// Gutter room for breakpoint dots, left of the line numbers.
+const DOT_ROOM: f32 = 14.0;
 const PAD: V2 = v2(8.0, 6.0);
 const NO_HORIZONTAL_SCROLL: i32 = 32768;
 const VAR_FRAME_BORDER_SIZE: i32 = 13;
@@ -174,8 +178,16 @@ fn draw_popup(a: &Assist, pos: V2) {
     gfx::end_tooltip();
 }
 
-/// Draws the editor `size` big (0 = fill, negative = fill except that much). Returns true when the text changed.
-pub fn code_editor(id: &str, code: &mut Code, size: V2) -> bool {
+/// What the editor marks: lines with a breakpoint (a dot in the gutter), and the line a paused mod stopped at.
+#[derive(Default)]
+pub struct Marks<'a> {
+    pub breakpoints: &'a [usize],
+    pub paused_at: Option<usize>,
+}
+
+/// Draws the editor `size` big (0 = fill, negative = fill except that much). Returns the line number whose gutter
+/// was clicked (to toggle its breakpoint), if one was.
+pub fn code_editor(id: &str, code: &mut Code, size: V2, marks: &Marks) -> Option<usize> {
     gfx::push_color(gfx::COL_CHILD_BG, BG);
     gfx::begin_child(&format!("{id}_scroll"), size, gfx::CHILD_BORDERS, gfx::WINDOW_HORIZONTAL_SCROLLBAR);
     gfx::pop_colors(1);
@@ -183,7 +195,7 @@ pub fn code_editor(id: &str, code: &mut Code, size: V2) -> bool {
     let source = code.as_str().to_string(); // as drawn; the box below may change the text
     let lines: Vec<&str> = source.split('\n').collect();
     let lh = gfx::line_height();
-    let gutter = gfx::text_width(&lines.len().to_string()) + 18.0;
+    let gutter = gfx::text_width(&lines.len().to_string()) + 18.0 + DOT_ROOM;
     let widest = lines.iter().map(|l| gfx::text_width(l)).fold(0.0, f32::max);
     let room = gfx::avail();
     let width = (widest + PAD.x * 2.0 + 40.0).max(room.x - gutter);
@@ -203,6 +215,14 @@ pub fn code_editor(id: &str, code: &mut Code, size: V2) -> bool {
             continue;
         }
         let y = origin.y + PAD.y + i as f32 * lh;
+        if marks.paused_at == Some(i + 1) {
+            gfx::draw_rect(v2(origin.x, y), v2(origin.x + width + gutter, y + lh), PAUSED_LINE, 0.0);
+        }
+        if marks.breakpoints.contains(&(i + 1)) {
+            let r = (lh * 0.28).max(3.0);
+            let c = v2(origin.x + 4.0 + r, y + lh / 2.0);
+            gfx::draw_rect(v2(c.x - r, c.y - r), v2(c.x + r, c.y + r), BREAKPOINT, r);
+        }
         let n = (i + 1).to_string();
         gfx::draw_text(v2(origin.x + gutter - 12.0 - gfx::text_width(&n), y), LINE_NUMBER, &n);
         let x = origin.x + gutter + PAD.x;
@@ -215,6 +235,12 @@ pub fn code_editor(id: &str, code: &mut Code, size: V2) -> bool {
             }
         }
     }
+
+    // A click in the gutter toggles that line's breakpoint.
+    let toggled = gfx::clicked_at()
+        .filter(|m| m.x >= origin.x && m.x < origin.x + gutter - 6.0 && m.y >= origin.y + PAD.y)
+        .map(|m| ((m.y - origin.y - PAD.y) / lh) as usize + 1)
+        .filter(|&line| line <= lines.len());
 
     // The text box on top: it edits, and draws only the cursor and the selection.
     gfx::set_cursor_pos(v2(origin.x + gutter, origin.y));
@@ -238,7 +264,7 @@ pub fn code_editor(id: &str, code: &mut Code, size: V2) -> bool {
     (a.active, a.seen) = (a.seen, false);
     // ponytail: the outer scroll doesn't follow the cursor when typing past the bottom edge; scroll with the wheel.
     let flags = text_flags::ALLOW_TAB_INPUT | NO_HORIZONTAL_SCROLL | gfx::INPUT_CALLBACK_ALWAYS;
-    let changed = gfx::input_text_multiline(&format!("##{id}"), &mut code.buf, v2(width, height), flags, on_frame, a as *mut Assist as *mut c_void);
+    gfx::input_text_multiline(&format!("##{id}"), &mut code.buf, v2(width, height), flags, on_frame, a as *mut Assist as *mut c_void);
     gfx::pop_vars(2);
     gfx::pop_colors(6);
 
@@ -256,7 +282,7 @@ pub fn code_editor(id: &str, code: &mut Code, size: V2) -> bool {
         }
     }
     gfx::end_child();
-    changed
+    toggled
 }
 
 #[cfg(test)]
