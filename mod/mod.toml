@@ -1,0 +1,6 @@
+name = "rhai_studio"
+
+[oxidizer]
+# The library is in bin/: rhai_studio.dll on Windows, librhai_studio.so on Linux, librhai_studio.dylib on macOS.
+# (Not next to this file: StarMap would try to load mods/rhai_studio/rhai_studio.dll as a C# mod.)
+dll = "bin/rhai_studio"

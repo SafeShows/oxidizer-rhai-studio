@@ -1,0 +1,65 @@
+# Push a tag like v1.0.0 to publish a GitHub release with <id>-<version>.zip: one <id>/ folder with mod.toml and the
+# library for Windows, Linux and macOS (Apple Silicon) in bin/. The id is the package name in Cargo.toml. That name
+# and layout is what the KSA content index (and mod managers like Borea) expect.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: # manual run: builds the zip as an artifact, publishes nothing
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: cargo build --release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lib-${{ matrix.os }}
+          path: |
+            target/release/*.dll
+            target/release/*.so
+            target/release/*.dylib
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v8
+        with:
+          path: libs
+          merge-multiple: true
+
+      - name: Zip
+        run: |
+          id=$(sed -n 's/^name = "\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p "dist/$id/bin"
+          cp -R mod/. "dist/$id/"
+          cp libs/* "dist/$id/bin/"
+          cp LICENSE "dist/$id/"
+          python3 scripts/notices.py "dist/$id/THIRD-PARTY-NOTICES.txt" # licenses of the crates in the library
+          cd dist && zip -qr "../$id-$version.zip" "$id"
+
+      - name: Zip (manual run)
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: actions/upload-artifact@v7
+        with:
+          name: zip
+          path: "*.zip"
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(sed -n 's/^name = "\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+          gh release create "$GITHUB_REF_NAME" "$id-${GITHUB_REF_NAME#v}.zip" --title "$id $GITHUB_REF_NAME" --generate-notes

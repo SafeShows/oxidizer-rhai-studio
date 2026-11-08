@@ -1,0 +1,4 @@
+/target
+# typed bindings from `oxidizer --bindgen`: generated per game version, so not committed
+/src/ksa.rs
+.DS_Store

@@ -1,0 +1,12 @@
+[package]
+name = "rhai_studio" # also the mod id (its folder in mods/): rename together with mod/mod.toml
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+oxidizer_api = { version = "0.4", path = "../ksa_mod_loader_rs/oxidizer_api" } # path until 0.4.0 is on crates.io
+toml = "1.2"

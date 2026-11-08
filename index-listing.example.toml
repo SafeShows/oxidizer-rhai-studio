@@ -1,0 +1,32 @@
+# A starting point for listing this mod in the KSA content index (https://github.com/KSAModding/content-index).
+# Copy it to listings/<your mod id>.toml in a fork of that repository, fill it in, and open a pull request.
+# Publish a release first: the index checks your latest release when you open the pull request.
+spec_version = 1
+id = "rhai_studio"
+type = "mod"
+name = "Rhai Studio"
+authors = ["SafeShows"]
+abstract = "Write Rhai mods inside the game: an editor with hot reload, a new-mod wizard, errors and a live console."
+license = "MIT-0"
+tags = ["tools"]
+
+[releases]
+github = "SafeShows/oxidizer-rhai-studio"
+
+[links]
+forums = "https://forums.ahwoo.com/threads/your-thread.123/"   # required: a thread for your mod
+repository = "https://github.com/SafeShows/oxidizer-rhai-studio"
+
+[compatibility]
+game_min = "2026.10.25.5707"
+
+# Oxidizer mods run as StarMap mods that need Oxidizer.StarMap, so mod managers install both for you.
+# They also run with standalone Oxidizer.
+[loader]
+id = "StarMap"
+min = "0.4.6"                      # the StarMap version Oxidizer.StarMap needs; the index requires a min
+
+[[dependencies]]
+id = "Oxidizer.StarMap"
+kind = "required"
+min = "0.7.0"
