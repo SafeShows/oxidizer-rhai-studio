@@ -69,7 +69,7 @@ dependencies = [
 
 [[package]]
 name = "rhai_studio"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "libloading",
  "oxidizer_api",
