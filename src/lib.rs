@@ -30,8 +30,9 @@ const INK: [f32; 4] = [0.05, 0.06, 0.07, 1.0];
 const LABEL: [f32; 4] = [0.62, 0.66, 0.70, 1.0];
 const TEXT: [f32; 4] = [0.92, 0.93, 0.95, 1.0];
 const SIDEBAR_WIDTH: f32 = 230.0;
-/// Height of the log and console under the editor.
-const OUTPUT_HEIGHT: f32 = 170.0;
+/// Height of the console drawer when open, and of the bar it folds into.
+const DRAWER_HEIGHT: f32 = 200.0;
+const BAR_HEIGHT: f32 = 34.0;
 
 struct Studio {
     visible: bool,
@@ -45,6 +46,9 @@ struct Studio {
     new_name: TextBuffer,
     new_error: Option<String>,
     console: Console,
+    /// The console drawer: whether it is open, and its height now (it slides between 0 and DRAWER_HEIGHT).
+    drawer_open: bool,
+    drawer: f32,
     frames: u64,
 }
 
@@ -69,8 +73,9 @@ fn heading(s: &str) {
 impl Mod for Studio {
     fn init() -> Self {
         log("rhai_studio: F9 opens Rhai Studio");
+        let (visible, drawer_open) = load_settings();
         Studio {
-            visible: load_visible(),
+            visible,
             mods: files::rhai_mods(),
             statuses: vec![],
             docs: vec![],
@@ -79,6 +84,8 @@ impl Mod for Studio {
             new_name: TextBuffer::default(),
             new_error: None,
             console: Console::new(),
+            drawer_open,
+            drawer: if drawer_open { DRAWER_HEIGHT } else { 0.0 },
             frames: 0,
         }
     }
@@ -101,7 +108,7 @@ impl Mod for Studio {
         }
     }
 
-    fn gui(&mut self, _dt: f64) {
+    fn gui(&mut self, dt: f64) {
         if !self.visible {
             return;
         }
@@ -110,7 +117,13 @@ impl Mod for Studio {
         gfx::push_var(gfx::VAR_FRAME_ROUNDING, 3.0);
         let mut open = true;
         if imgui::begin_closable("RHAI STUDIO", &mut open) {
-            let top = gfx::avail().y - OUTPUT_HEIGHT - 50.0;
+            // The drawer slides toward open or closed.
+            let target = if self.drawer_open { DRAWER_HEIGHT } else { 0.0 };
+            self.drawer += (target - self.drawer) * (dt as f32 * 14.0).min(1.0);
+            if (target - self.drawer).abs() < 0.5 {
+                self.drawer = target;
+            }
+            let top = gfx::avail().y - self.drawer - BAR_HEIGHT;
             gfx::begin_child("rhai_studio_mods", v2(SIDEBAR_WIDTH, top), gfx::CHILD_BORDERS, 0);
             self.draw_sidebar();
             gfx::end_child();
@@ -118,8 +131,7 @@ impl Mod for Studio {
             gfx::begin_child("rhai_studio_main", v2(0.0, top), 0, 0);
             self.draw_tabs();
             gfx::end_child();
-            heading("CONSOLE");
-            self.console.draw(OUTPUT_HEIGHT);
+            self.draw_drawer();
         }
         imgui::end();
         gfx::pop_vars(1);
@@ -136,7 +148,32 @@ impl Mod for Studio {
 impl Studio {
     fn toggle(&mut self) {
         self.visible = !self.visible;
-        let _ = std::fs::write(config_path("rhai_studio"), format!("visible = {}\n", self.visible));
+        self.save_settings();
+    }
+
+    fn save_settings(&self) {
+        let _ = std::fs::write(config_path("rhai_studio"), format!("visible = {}\nconsole = {}\n", self.visible, self.drawer_open));
+    }
+
+    /// The bar at the bottom, with the console drawer that slides up from it.
+    fn draw_drawer(&mut self) {
+        if button("CONSOLE", self.drawer_open.then_some(GREEN)) {
+            self.drawer_open = !self.drawer_open;
+            self.save_settings();
+        }
+        imgui::same_line();
+        self.console.poll_log();
+        if !self.drawer_open {
+            // Folded: the newest line, so nothing goes unseen.
+            if let Some((color, line)) = self.console.last() {
+                imgui::text_colored(*color, line);
+            }
+        } else {
+            imgui::text_colored(LABEL, "Rhai runs against the live game, e.g. ksa::Program::controlled_vehicle().id");
+        }
+        if self.drawer > 40.0 {
+            self.console.draw(self.drawer - 36.0);
+        }
     }
 
     fn status(&self, id: &str) -> Option<&ModStatus> {
@@ -268,12 +305,11 @@ impl Studio {
     }
 }
 
-fn load_visible() -> bool {
-    std::fs::read_to_string(config_path("rhai_studio"))
-        .ok()
-        .and_then(|t| t.parse::<toml::Table>().ok())
-        .and_then(|t| t.get("visible")?.as_bool())
-        .unwrap_or(true)
+/// (window visible, console drawer open)
+fn load_settings() -> (bool, bool) {
+    let t = std::fs::read_to_string(config_path("rhai_studio")).ok().and_then(|t| t.parse::<toml::Table>().ok()).unwrap_or_default();
+    let flag = |k: &str, d: bool| t.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
+    (flag("visible", true), flag("console", true))
 }
 
 oxidizer_api::oxidizer_mod!(Studio);

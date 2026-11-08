@@ -11,7 +11,8 @@ and Oxidizer reloads the mod within a second, while you keep flying.
 - **New mod:** type a name and press Create: Rhai Studio makes `mods/<name>/` with a `mod.toml` and a starter script
   that opens a window, and Oxidizer starts it right away, no restart.
 - **Errors:** a mod that fails to load or stops on an error shows the error, with its line, above the editor.
-- **Console:** under the editor, the log as it comes in (your `print()` output too) and a line that runs Rhai against
+- **Console:** a drawer that slides up from the CONSOLE button under the editor (folded, the bar shows the newest
+  line), with the log as it comes in (your `print()` output too) and a line that runs Rhai against
   the live game: `ksa::Program::controlled_vehicle().id`, `let v = ...` and then `v.get_surface_speed()`.
 
 **F9** opens and closes Rhai Studio; it is in the game's **Mods** menu too.

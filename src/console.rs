@@ -19,9 +19,8 @@ impl Console {
     pub fn new() -> Console {
         // Start from the log's last 50 lines, so loading messages and errors are visible right away.
         let next_log = oxidizer_api::log_next().saturating_sub(50);
-        let mut c = Console { lines: vec![], next_log, input: TextBuffer::default() };
-        c.lines.push((GREY, "Console: type Rhai and press Enter, e.g. ksa::Program::controlled_vehicle().id".into()));
-        c
+        
+        Console { lines: vec![], next_log, input: TextBuffer::default() }
     }
 
     fn push(&mut self, color: [f32; 4], text: &str) {
@@ -30,8 +29,13 @@ impl Console {
         self.lines.drain(..over);
     }
 
-    /// New lines of Oxidizer's log.
-    fn poll_log(&mut self) {
+    /// The newest line.
+    pub fn last(&self) -> Option<&([f32; 4], String)> {
+        self.lines.last()
+    }
+
+    /// Takes in new lines of Oxidizer's log.
+    pub fn poll_log(&mut self) {
         let next = oxidizer_api::log_next();
         if next > self.next_log {
             for line in oxidizer_api::log_lines(self.next_log) {
