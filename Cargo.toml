@@ -8,5 +8,6 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-oxidizer_api = { version = "0.4", path = "../ksa_mod_loader_rs/oxidizer_api" } # path until 0.4.0 is on crates.io
+oxidizer_api = "0.4"
 toml = "1.2"
+libloading = "0.9"

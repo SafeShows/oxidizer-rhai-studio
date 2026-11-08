@@ -27,8 +27,9 @@ Oxidizer's [Rhai section](https://github.com/SafeShows/Oxidizer#rhai) lists what
 modules (`ksa::Program::controlled_vehicle()`), ImGui windows, hotkeys, settings and patching game methods. For
 autocomplete in a desktop editor, Oxidizer writes definition files to `<documents>/oxidizer/definitions/`.
 
-The text box is the game's plain ImGui text field: no syntax colors yet (planned), but undo (Ctrl+Z), select all,
-copy and paste work as usual, and Tab types a tab.
+The editor colors Rhai (keywords, strings, numbers, comments, calls, `ksa::` modules) and numbers its lines. It is
+the game's own ImGui text box underneath, so undo (Ctrl+Z), select all, copy and paste work as usual, and Tab types a
+tab. The window follows the game's look: a mod list on the left, filled status labels, the console below.
 
 ## Build
 
@@ -39,7 +40,8 @@ Windows, which keeps the loaded library locked):
 ./install.sh     # Linux, macOS
 ```
 It is written with [`oxidizer_api`](https://docs.rs/oxidizer_api): `src/console.rs` shows `rhai_eval` and the log,
-`src/files.rs` the files, and `src/lib.rs` the window. Pushing a tag like `v1.0.0` publishes a release with
+`src/files.rs` the files, `src/editor.rs` and `src/highlight.rs` the colored editor (drawn over the game's text
+box with ImGui's draw lists, in `src/gfx.rs`), and `src/lib.rs` the window. Pushing a tag like `v1.0.0` publishes a release with
 `rhai_studio-1.0.0.zip`, which includes `THIRD-PARTY-NOTICES.txt` for the crates compiled in.
 
 ## License

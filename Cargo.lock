@@ -43,6 +43,8 @@ dependencies = [
 [[package]]
 name = "oxidizer_api"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4df38162515cf1c9a1700fb3dc6e97d264ba2937f2189ff648742aae7add4445"
 dependencies = [
  "libloading",
 ]
@@ -69,6 +71,7 @@ dependencies = [
 name = "rhai_studio"
 version = "0.1.0"
 dependencies = [
+ "libloading",
  "oxidizer_api",
  "toml",
 ]
