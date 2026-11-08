@@ -4,6 +4,8 @@ Write [Kitten Space Agency](https://ksa.ahwoo.com) mods inside the game. Rhai St
 [Oxidizer](https://github.com/SafeShows/Oxidizer)'s Rhai mods: open a mod's scripts, change them, press **Ctrl+S**,
 and Oxidizer reloads the mod within a second, while you keep flying.
 
+![Rhai Studio in game: the mod list, a script with syntax colors, and the console](docs/screenshot.png)
+
 - **Edit:** every installed Rhai mod with its scripts, opened in tabs. Save with Ctrl+S or the Save button; Revert goes
   back to the file on disk. Files changed in another editor are picked up when the tab has no unsaved edits.
 - **New mod:** type a name and press Create: Rhai Studio makes `mods/<name>/` with a `mod.toml` and a starter script
