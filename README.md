@@ -1,76 +1,47 @@
-# Oxidizer Rust mod template
+# Rhai Studio
 
-A starting point for a [Kitten Space Agency](https://ksa.ahwoo.com) mod written in Rust, run by
-[Oxidizer](https://github.com/SafeShows/Oxidizer) on Windows, Linux and macOS.
+Write [Kitten Space Agency](https://ksa.ahwoo.com) mods inside the game. Rhai Studio is an in-game editor for
+[Oxidizer](https://github.com/SafeShows/Oxidizer)'s Rhai mods: open a mod's scripts, change them, press **Ctrl+S**,
+and Oxidizer reloads the mod within a second, while you keep flying.
 
-The example mod opens a window with the controlled vehicle and the game time, adds an entry to the game's **Mods**
-menu, toggles with **F8**, and hooks a game method.
+- **Edit:** every installed Rhai mod with its scripts, opened in tabs. Save with Ctrl+S or the Save button; Revert goes
+  back to the file on disk. Files changed in another editor are picked up when the tab has no unsaved edits.
+- **New mod:** type a name and press Create: Rhai Studio makes `mods/<name>/` with a `mod.toml` and a starter script
+  that opens a window, and Oxidizer starts it right away, no restart.
+- **Errors:** a mod that fails to load or stops on an error shows the error, with its line, above the editor.
+- **Console:** under the editor, the log as it comes in (your `print()` output too) and a line that runs Rhai against
+  the live game: `ksa::Program::controlled_vehicle().id`, `let v = ...` and then `v.get_surface_speed()`.
 
-## Start
+**F9** opens and closes Rhai Studio; it is in the game's **Mods** menu too.
 
-1. Install Oxidizer: as a StarMap mod (`Oxidizer.StarMap`) or standalone, see
-   [Oxidizer's install steps](https://github.com/SafeShows/Oxidizer#install). Install
-   [Rust](https://rustup.rs) too.
-2. Click **Use this template** on GitHub to make your own repository from this one, and clone it.
-3. Build and install the mod into the game's mods folder (quit the game first on Windows):
-   ```sh
-   ./install.ps1    # Windows
-   ./install.sh     # Linux, macOS
-   ```
-   Both take the mods folder as an argument if the game's folder isn't in the usual place.
-4. Start the game, and enable the mod when it asks. **Mods > Oxidizer** shows errors and the log.
+## Install
 
-## Make it yours
+Needs Oxidizer 0.7.0 or later, as the StarMap mod (`Oxidizer.StarMap`) or standalone; see
+[Oxidizer's install steps](https://github.com/SafeShows/Oxidizer#install). Unzip `rhai_studio-X.Y.Z.zip` from the
+[releases](../../releases) into `Documents/My Games/Kitten Space Agency/mods/`, so there is a `mods/rhai_studio/`
+folder. Windows, Linux and macOS.
 
-The mod's id is its folder name in `mods/`, and here it is the package name in `Cargo.toml`. To rename it from
-`my_mod`, change these together:
-- `name` in `Cargo.toml`,
-- `name` and the `dll` path in `mod/mod.toml`,
-- `id` in `index-listing.example.toml`.
+## Writing Rhai mods
 
-The install scripts and the release workflow read the id from `Cargo.toml`.
+Oxidizer's [Rhai section](https://github.com/SafeShows/Oxidizer#rhai) lists what scripts can do: the game as typed
+modules (`ksa::Program::controlled_vehicle()`), ImGui windows, hotkeys, settings and patching game methods. For
+autocomplete in a desktop editor, Oxidizer writes definition files to `<documents>/oxidizer/definitions/`.
 
-`LICENSE` is MIT No Attribution, so you can relicense your mod however you like: replace it with your own.
+The text box is the game's plain ImGui text field: no syntax colors yet (planned), but undo (Ctrl+Z), select all,
+copy and paste work as usual, and Tab types a tab.
 
-## Write the mod
+## Build
 
-`src/lib.rs` implements `oxidizer_api::Mod`: `init`, `frame`, `gui`, `menu` and `unload`, all but `init` optional.
-The API (game objects, hooks and their return values, ImGui, keys, settings) is on
-[docs.rs](https://docs.rs/oxidizer_api); [Oxidizer's README](https://github.com/SafeShows/Oxidizer#rust) has an
-overview.
-
-The template uses the by-name API, `Obj::static_get("KSA.Program, KSA", "ControlledVehicle")`. For typed access to
-the whole game, with autocomplete and compile-time checks, generate bindings for your installed game:
+Install [Rust](https://rustup.rs), then build and copy the mod into the game's mods folder (quit the game first on
+Windows, which keeps the loaded library locked):
 ```sh
-oxidizer --bindgen src/ksa.rs     # with standalone Oxidizer; again after each game update
+./install.ps1    # Windows
+./install.sh     # Linux, macOS
 ```
-```rust
-mod ksa;
-use ksa::ksa::{Program, Universe};
+It is written with [`oxidizer_api`](https://docs.rs/oxidizer_api): `src/console.rs` shows `rhai_eval` and the log,
+`src/files.rs` the files, and `src/lib.rs` the window. Pushing a tag like `v1.0.0` publishes a release with
+`rhai_studio-1.0.0.zip`, which includes `THIRD-PARTY-NOTICES.txt` for the crates compiled in.
 
-let vehicle = Program::controlled_vehicle(); // a typed ksa::ksa::Vehicle
-let time = Universe::get_elapsed_seconds();
-```
-`src/ksa.rs` is in `.gitignore` because it belongs to one game version; CI doesn't have the game to generate it,
-so a release build needs it committed (or keep using the by-name API).
+## License
 
-Keep the library in `mod/`'s `bin/` folder, as `mod.toml` says: StarMap tries to load `mods/<id>/<id>.dll` as a C#
-mod, and a native library there stops the game.
-
-## Release
-
-Push a tag:
-```sh
-git tag v1.0.0
-git push origin v1.0.0
-```
-The workflow builds the mod for Windows, Linux and macOS and publishes a release with `my_mod-1.0.0.zip`, holding a
-`my_mod/` folder with `mod.toml`, all three libraries in `bin/`, and `THIRD-PARTY-NOTICES.txt` with the licenses of the crates compiled into them (`scripts/notices.py`; forum rules ask for that attribution), the layout mod managers install.
-
-## List it in the content index
-
-So players can find and install the mod with managers like Borea, list it in the
-[KSA content index](https://github.com/KSAModding/content-index): copy `index-listing.example.toml` to
-`listings/<id>.toml` in a fork of that repository, fill it in, and open a pull request. Publish your release
-**first**, because the index checks it when you open the pull request. The listing also needs a thread for the mod
-on the [KSA forums](https://forums.ahwoo.com).
+[MIT No Attribution](LICENSE).
