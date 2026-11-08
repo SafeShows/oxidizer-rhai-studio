@@ -64,6 +64,7 @@ impl Console {
         }
         imgui::stick_to_bottom();
         imgui::end_child();
+        crate::gfx::next_width(-f32::MIN_POSITIVE);
         if imgui::input_text("##console", &mut self.input, text_flags::ENTER_RETURNS_TRUE) {
             let code = self.input.as_str().trim().to_string();
             if !code.is_empty() {

@@ -5,34 +5,30 @@
 //! - editor.rs: the code editor with syntax colors (highlight.rs colors Rhai)
 //! - files.rs: finding Rhai mods, open documents, new mods
 //! - console.rs: the log and the console line
+//! - theme.rs: the look of the game's own dialogs
 //! - gfx.rs: ImGui drawing the API doesn't wrap
-//! - this file: the window, styled after the game's own panels
+//! - this file: the window
 
 mod console;
 mod editor;
 mod files;
 mod gfx;
 mod highlight;
+mod theme;
 
 use console::Console;
 use files::{Doc, RhaiMod};
 use gfx::v2;
 use oxidizer_api::imgui::{self, TextBuffer, tab_flags, text_flags};
 use oxidizer_api::{Mod, ModStatus, config_path, key_pressed, log};
+use theme::{GREEN, MUTED, RED};
 
-// The game's panel colors: green and red filled buttons with dark text, grey labels, dark frames.
-const GREEN: [f32; 4] = [0.33, 0.80, 0.36, 1.0];
-const RED: [f32; 4] = [0.80, 0.22, 0.18, 1.0];
-const AMBER: [f32; 4] = [0.93, 0.78, 0.30, 1.0];
-const DARK: [f32; 4] = [0.16, 0.18, 0.20, 1.0];
-const DARK_HOVER: [f32; 4] = [0.24, 0.27, 0.30, 1.0];
-const INK: [f32; 4] = [0.05, 0.06, 0.07, 1.0];
-const LABEL: [f32; 4] = [0.62, 0.66, 0.70, 1.0];
-const TEXT: [f32; 4] = [0.92, 0.93, 0.95, 1.0];
-const SIDEBAR_WIDTH: f32 = 230.0;
-/// Height of the console drawer when open, and of the bar it folds into.
+const TITLE: &str = "RHAI STUDIO";
+const TITLE_HEIGHT: f32 = 34.0;
+const FOOTER_HEIGHT: f32 = 50.0;
+const SIDEBAR_WIDTH: f32 = 240.0;
+/// Height of the console drawer when open.
 const DRAWER_HEIGHT: f32 = 200.0;
-const BAR_HEIGHT: f32 = 34.0;
 
 struct Studio {
     visible: bool,
@@ -50,24 +46,6 @@ struct Studio {
     drawer_open: bool,
     drawer: f32,
     frames: u64,
-}
-
-/// A button in the game's style: dark, or filled with `fill` and dark text.
-fn button(label: &str, fill: Option<[f32; 4]>) -> bool {
-    let (bg, fg) = fill.map_or((DARK, TEXT), |c| (c, INK));
-    let hover = fill.map_or(DARK_HOVER, |c| [c[0] * 1.12, c[1] * 1.12, c[2] * 1.12, 1.0]);
-    gfx::push_color(gfx::COL_BUTTON, bg);
-    gfx::push_color(gfx::COL_BUTTON_HOVERED, hover);
-    gfx::push_color(gfx::COL_BUTTON_ACTIVE, hover);
-    gfx::push_color(gfx::COL_TEXT, fg);
-    let clicked = imgui::button(label);
-    gfx::pop_colors(4);
-    clicked
-}
-
-/// A section label, like the game's panel headings.
-fn heading(s: &str) {
-    imgui::text_colored(LABEL, s);
 }
 
 impl Mod for Studio {
@@ -113,35 +91,41 @@ impl Mod for Studio {
             return;
         }
         self.statuses = oxidizer_api::mod_statuses();
+        let target = if self.drawer_open { DRAWER_HEIGHT } else { 0.0 };
+        self.drawer += (target - self.drawer) * (dt as f32 * 14.0).min(1.0);
+        if (target - self.drawer).abs() < 0.5 {
+            self.drawer = target;
+        }
+
+        theme::push();
         imgui::set_next_window_size(1100.0, 720.0);
-        gfx::push_var(gfx::VAR_FRAME_ROUNDING, 3.0);
-        let mut open = true;
-        if imgui::begin_closable("RHAI STUDIO", &mut open) {
-            // The drawer slides toward open or closed.
-            let target = if self.drawer_open { DRAWER_HEIGHT } else { 0.0 };
-            self.drawer += (target - self.drawer) * (dt as f32 * 14.0).min(1.0);
-            if (target - self.drawer).abs() < 0.5 {
-                self.drawer = target;
-            }
-            let top = gfx::avail().y - self.drawer - BAR_HEIGHT;
-            gfx::begin_child("rhai_studio_mods", v2(SIDEBAR_WIDTH, top), gfx::CHILD_BORDERS, 0);
+        if gfx::begin_window(TITLE, gfx::WINDOW_NO_TITLE_BAR | gfx::WINDOW_NO_COLLAPSE | gfx::WINDOW_NO_SCROLLBAR) {
+            let (pos, size) = (gfx::window_pos(), gfx::window_size());
+            // Title: centered, over a line across the window, like the game's dialogs.
+            gfx::draw_text(v2(pos.x + (size.x - gfx::text_width(TITLE)) / 2.0, pos.y + 9.0), theme::TEXT, TITLE);
+            gfx::draw_line(v2(pos.x, pos.y + TITLE_HEIGHT), v2(pos.x + size.x, pos.y + TITLE_HEIGHT), theme::LINE);
+            gfx::set_cursor_pos(v2(pos.x + 12.0, pos.y + TITLE_HEIGHT + 10.0));
+
+            let body = gfx::avail().y - self.drawer - FOOTER_HEIGHT;
+            gfx::begin_child("rhai_studio_side", v2(SIDEBAR_WIDTH, body), 0, 0);
             self.draw_sidebar();
             gfx::end_child();
             imgui::same_line();
-            gfx::begin_child("rhai_studio_main", v2(0.0, top), 0, 0);
+            gfx::begin_child("rhai_studio_main", v2(0.0, body), 0, 0);
             self.draw_tabs();
             gfx::end_child();
-            self.draw_drawer();
+            if self.drawer > 40.0 {
+                self.console.draw(self.drawer - 40.0);
+            }
+            self.draw_footer(pos, size);
         }
         imgui::end();
-        gfx::pop_vars(1);
-        if !open {
-            self.toggle();
-        }
+        theme::pop();
         if imgui::ctrl_shortcut('s')
-            && let Some(d) = self.active.and_then(|i| self.docs.get_mut(i)) {
-                d.save();
-            }
+            && let Some(d) = self.active.and_then(|i| self.docs.get_mut(i))
+        {
+            d.save();
+        }
     }
 }
 
@@ -153,27 +137,6 @@ impl Studio {
 
     fn save_settings(&self) {
         let _ = std::fs::write(config_path("rhai_studio"), format!("visible = {}\nconsole = {}\n", self.visible, self.drawer_open));
-    }
-
-    /// The bar at the bottom, with the console drawer that slides up from it.
-    fn draw_drawer(&mut self) {
-        if button("CONSOLE", self.drawer_open.then_some(GREEN)) {
-            self.drawer_open = !self.drawer_open;
-            self.save_settings();
-        }
-        imgui::same_line();
-        self.console.poll_log();
-        if !self.drawer_open {
-            // Folded: the newest line, so nothing goes unseen.
-            if let Some((color, line)) = self.console.last() {
-                imgui::text_colored(*color, line);
-            }
-        } else {
-            imgui::text_colored(LABEL, "Rhai runs against the live game, e.g. ksa::Program::controlled_vehicle().id");
-        }
-        if self.drawer > 40.0 {
-            self.console.draw(self.drawer - 36.0);
-        }
     }
 
     fn status(&self, id: &str) -> Option<&ModStatus> {
@@ -191,60 +154,105 @@ impl Studio {
         self.select = Some(i);
     }
 
+    /// The darker band at the bottom: the console toggle and the newest log line on the left, REVERT and the
+    /// amber SAVE on the right.
+    fn draw_footer(&mut self, pos: gfx::V2, size: gfx::V2) {
+        let top = pos.y + size.y - FOOTER_HEIGHT;
+        gfx::draw_rect(v2(pos.x + 1.0, top), v2(pos.x + size.x - 1.0, pos.y + size.y - 1.0), theme::FOOTER, 6.0);
+        gfx::draw_line(v2(pos.x, top), v2(pos.x + size.x, top), theme::LINE);
+        let h = gfx::line_height() + 12.0;
+        let y = top + (FOOTER_HEIGHT - h) / 2.0;
+
+        gfx::set_cursor_pos(v2(pos.x + 12.0, y));
+        if theme::toggle_button("CONSOLE", self.drawer_open, v2(theme::button_width("CONSOLE"), h)) {
+            self.drawer_open = !self.drawer_open;
+            self.save_settings();
+        }
+        self.console.poll_log();
+        if !self.drawer_open
+            && let Some((color, line)) = self.console.last()
+        {
+            // Folded: the newest line, so nothing goes unseen.
+            gfx::draw_text(v2(pos.x + 24.0 + theme::button_width("CONSOLE"), y + 6.0), *color, line);
+        }
+
+        let (save_w, revert_w) = (theme::button_width("SAVE") + 16.0, theme::button_width("REVERT"));
+        let doc = self.active.and_then(|i| self.docs.get_mut(i));
+        gfx::set_cursor_pos(v2(pos.x + size.x - 12.0 - save_w - 8.0 - revert_w, y));
+        if gfx::button_sized("REVERT", v2(revert_w, h))
+            && let Some(d) = doc
+        {
+            d.revert();
+        }
+        imgui::same_line();
+        if theme::primary_button("SAVE", v2(save_w, h))
+            && let Some(d) = self.active.and_then(|i| self.docs.get_mut(i))
+        {
+            d.save();
+        }
+    }
+
     fn draw_sidebar(&mut self) {
-        heading("MODS");
         let current = self.active.and_then(|i| self.docs.get(i)).map(|d| d.path.clone());
         let mut to_open = None;
-        for m in &self.mods {
-            let dot = match self.status(&m.id) {
-                Some(s) if s.problem.is_some() => RED,
-                Some(_) => GREEN,
-                None => LABEL,
-            };
-            imgui::text_colored(dot, "●");
-            imgui::same_line();
-            imgui::text(&m.id);
-            for f in &m.files {
-                let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                if gfx::selectable(&format!("    {name}##{}", f.display()), current.as_deref() == Some(f.as_path())) {
-                    to_open = Some((f.clone(), m.id.clone()));
+        if gfx::header("Mods", true) {
+            gfx::begin_child("rhai_studio_mods", v2(0.0, 0.0), gfx::CHILD_BORDERS | gfx::CHILD_AUTO_RESIZE_Y, 0);
+            for m in &self.mods {
+                let (dot, state) = match self.status(&m.id) {
+                    Some(s) if s.problem.is_some() => (RED, "error"),
+                    Some(_) => (GREEN, "running"),
+                    None => (MUTED, "not loaded"),
+                };
+                imgui::text_colored(dot, "●");
+                imgui::same_line();
+                imgui::text(&m.id);
+                imgui::same_line();
+                imgui::text_colored(MUTED, state);
+                for f in &m.files {
+                    let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    if gfx::selectable(&format!("    {name}##{}", f.display()), current.as_deref() == Some(f.as_path())) {
+                        to_open = Some((f.clone(), m.id.clone()));
+                    }
                 }
             }
-        }
-        if self.mods.is_empty() {
-            imgui::text_colored(LABEL, "No Rhai mods yet.");
+            if self.mods.is_empty() {
+                imgui::text_colored(MUTED, "No Rhai mods yet.");
+            }
+            gfx::end_child();
         }
         if let Some((path, id)) = to_open {
             self.open(&path, &id);
         }
 
-        gfx::dummy(v2(0.0, 8.0));
-        imgui::separator();
-        heading("NEW MOD");
-        let enter = imgui::input_text("##new_mod", &mut self.new_name, text_flags::ENTER_RETURNS_TRUE);
-        if button("CREATE", Some(GREEN)) || enter {
-            let id = self.new_name.as_str().trim().to_string();
-            match files::new_mod(&id) {
-                Ok(main) => {
-                    log(&format!("rhai_studio: made mods/{id}; Oxidizer starts it within a second"));
-                    self.new_name.set("");
-                    self.new_error = None;
-                    self.mods = files::rhai_mods();
-                    self.open(&main, &id);
+        if gfx::header("New mod", true) {
+            gfx::begin_child("rhai_studio_new", v2(0.0, 0.0), gfx::CHILD_BORDERS | gfx::CHILD_AUTO_RESIZE_Y, 0);
+            imgui::text("Name");
+            gfx::next_width(-f32::MIN_POSITIVE);
+            let enter = imgui::input_text("##new_mod", &mut self.new_name, text_flags::ENTER_RETURNS_TRUE);
+            if gfx::button_sized("CREATE", v2(-f32::MIN_POSITIVE, 0.0)) || enter {
+                let id = self.new_name.as_str().trim().to_string();
+                match files::new_mod(&id) {
+                    Ok(main) => {
+                        log(&format!("rhai_studio: made mods/{id}; Oxidizer starts it within a second"));
+                        self.new_name.set("");
+                        self.new_error = None;
+                        self.mods = files::rhai_mods();
+                        self.open(&main, &id);
+                    }
+                    Err(e) => self.new_error = Some(e),
                 }
-                Err(e) => self.new_error = Some(e),
             }
-        }
-        if let Some(e) = &self.new_error {
-            imgui::text_colored(RED, e);
+            if let Some(e) = &self.new_error {
+                imgui::text_colored(RED, e);
+            }
+            gfx::end_child();
         }
     }
 
     fn draw_tabs(&mut self) {
         self.active = None;
         if self.docs.is_empty() {
-            heading("EDITOR");
-            imgui::text_colored(LABEL, "Pick a script on the left, or make a new mod.");
+            imgui::text_colored(MUTED, "Pick a script on the left, or make a new mod.");
             return;
         }
         let mut close = None;
@@ -277,24 +285,15 @@ impl Studio {
     fn draw_doc(&mut self, i: usize) {
         let status = self.status(&self.docs[i].mod_id).cloned();
         let d = &mut self.docs[i];
-        let dirty = d.dirty();
-        if button("SAVE", dirty.then_some(GREEN)) {
-            d.save();
-        }
-        imgui::same_line();
-        if button("REVERT", None) {
-            d.revert();
-        }
-        imgui::same_line();
-        // The mod's state, as a filled label like the game's ENGINE / SHUTDN indicators.
-        match &status {
-            Some(s) if s.problem.is_some() => button("ERROR", Some(RED)),
-            Some(_) => button("RUNNING", Some(GREEN)),
-            None => button("NOT LOADED", Some(AMBER)),
+        let (color, state) = match &status {
+            Some(s) if s.problem.is_some() => (RED, "ERROR"),
+            Some(_) => (GREEN, "RUNNING"),
+            None => (MUTED, "NOT LOADED"),
         };
+        imgui::text_colored(color, &format!("● {state}"));
         imgui::same_line();
         let lines = d.text.as_str().lines().count();
-        imgui::text_colored(LABEL, &format!("{lines} lines  {}  Ctrl+S saves", if dirty { "MODIFIED" } else { "SAVED" }));
+        imgui::text_colored(MUTED, &format!("  {lines} lines   {}   Ctrl+S saves", if d.dirty() { "modified" } else { "saved" }));
         if let Some(e) = &d.error {
             imgui::text_colored(RED, e);
         }

@@ -40,7 +40,12 @@ struct Fns {
     begin_child: unsafe extern "C" fn(S, *const V2, i32, i32) -> bool,
     end_child: unsafe extern "C" fn(),
     selectable: unsafe extern "C" fn(S, bool, i32, *const V2) -> bool,
-    dummy: unsafe extern "C" fn(*const V2),
+    begin: unsafe extern "C" fn(S, *mut bool, i32) -> bool,
+    collapsing_header: unsafe extern "C" fn(S, i32) -> bool,
+    set_next_item_width: unsafe extern "C" fn(f32),
+    window_pos: unsafe extern "C" fn() -> V2,
+    button: unsafe extern "C" fn(S, *const V2) -> bool,
+    add_line: unsafe extern "C" fn(DrawList, *const V2, *const V2, u32, f32),
 }
 
 fn fns() -> &'static Fns {
@@ -71,7 +76,12 @@ fn fns() -> &'static Fns {
             begin_child: sym!("BeginChild_0"),
             end_child: sym!("EndChild"),
             selectable: sym!("Selectable_0"),
-            dummy: sym!("Dummy"),
+            begin: sym!("Begin"),
+            collapsing_header: sym!("CollapsingHeader_0"),
+            set_next_item_width: sym!("SetNextItemWidth"),
+            window_pos: sym!("GetWindowPos"),
+            button: sym!("Button"),
+            add_line: sym!("ImDrawList_AddLine"),
         };
         std::mem::forget(lib);
         f
@@ -130,15 +140,11 @@ pub fn scroll_y() -> f32 {
 
 // ImGuiStyleVar and ImGuiCol values of the game's ImGui.
 pub const VAR_FRAME_PADDING: i32 = 11;
-pub const VAR_FRAME_ROUNDING: i32 = 12;
 pub const COL_TEXT: i32 = 0;
 pub const COL_CHILD_BG: i32 = 3;
 pub const COL_FRAME_BG: i32 = 7;
 pub const COL_FRAME_BG_HOVERED: i32 = 8;
 pub const COL_FRAME_BG_ACTIVE: i32 = 9;
-pub const COL_BUTTON: i32 = 21;
-pub const COL_BUTTON_HOVERED: i32 = 22;
-pub const COL_BUTTON_ACTIVE: i32 = 23;
 pub const COL_INPUT_TEXT_CURSOR: i32 = 33;
 pub const COL_TEXT_SELECTED_BG: i32 = 53;
 
@@ -179,7 +185,41 @@ pub fn selectable(label: &str, selected: bool) -> bool {
     unsafe { (fns().selectable)(c(label).as_ptr(), selected, 0, &V2::default()) }
 }
 
-/// Empty space of this size in the layout.
-pub fn dummy(size: V2) {
-    unsafe { (fns().dummy)(&size) }
+
+pub const WINDOW_NO_TITLE_BAR: i32 = 1;
+pub const WINDOW_NO_COLLAPSE: i32 = 32;
+pub const WINDOW_NO_SCROLLBAR: i32 = 8;
+pub const CHILD_AUTO_RESIZE_Y: i32 = 32;
+pub const TREE_DEFAULT_OPEN: i32 = 32;
+
+/// A window with flags. Call `imgui::end` regardless.
+pub fn begin_window(title: &str, flags: i32) -> bool {
+    unsafe { (fns().begin)(c(title).as_ptr(), std::ptr::null_mut(), flags) }
+}
+
+/// A section header bar; true while open.
+pub fn header(label: &str, default_open: bool) -> bool {
+    unsafe { (fns().collapsing_header)(c(label).as_ptr(), if default_open { TREE_DEFAULT_OPEN } else { 0 }) }
+}
+
+/// Width of the next widget: negative fills the row except that much (`-f32::MIN_POSITIVE` fills it all).
+pub fn next_width(w: f32) {
+    unsafe { (fns().set_next_item_width)(w) }
+}
+
+pub fn window_pos() -> V2 {
+    unsafe { (fns().window_pos)() }
+}
+
+pub fn window_size() -> V2 {
+    unsafe { (fns().window_size)() }
+}
+
+/// A button of a given size (0 = fit the label).
+pub fn button_sized(label: &str, size: V2) -> bool {
+    unsafe { (fns().button)(c(label).as_ptr(), &size) }
+}
+
+pub fn draw_line(a: V2, b: V2, color: [f32; 4]) {
+    unsafe { (fns().add_line)((fns().get_window_draw_list)(), &a, &b, rgba(color), 1.0) }
 }

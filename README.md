@@ -32,7 +32,8 @@ autocomplete in a desktop editor, Oxidizer writes definition files to `<document
 
 The editor colors Rhai (keywords, strings, numbers, comments, calls, `ksa::` modules) and numbers its lines. It is
 the game's own ImGui text box underneath, so undo (Ctrl+Z), select all, copy and paste work as usual, and Tab types a
-tab. The window follows the game's look: a mod list on the left, filled status labels, the console below.
+tab. The window is styled like the game's own dialogs: a centered title, section bars over bordered boxes, and a
+footer with the console toggle, REVERT and an amber SAVE.
 
 ## Build
 

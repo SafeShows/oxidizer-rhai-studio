@@ -18,6 +18,7 @@ const SELECTION: [f32; 4] = [0.25, 0.45, 0.75, 0.45];
 const CLEAR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 const PAD: V2 = v2(8.0, 6.0);
 const NO_HORIZONTAL_SCROLL: i32 = 32768;
+const VAR_FRAME_BORDER_SIZE: i32 = 13;
 
 /// Draws the editor `size` big (0 = fill, negative = fill except that much). Returns true when the text changed.
 pub fn code_editor(id: &str, text: &mut TextBuffer, size: V2) -> bool {
@@ -74,9 +75,10 @@ pub fn code_editor(id: &str, text: &mut TextBuffer, size: V2) -> bool {
         gfx::push_color(idx, color);
     }
     gfx::push_var2(gfx::VAR_FRAME_PADDING, PAD);
+    gfx::push_var(VAR_FRAME_BORDER_SIZE, 0.0); // no outline: the editor is the frame
     // ponytail: the outer scroll doesn't follow the cursor when typing past the bottom edge; scroll with the wheel.
     let changed = imgui::input_text_multiline(&format!("##{id}"), text, width, height, text_flags::ALLOW_TAB_INPUT | NO_HORIZONTAL_SCROLL);
-    gfx::pop_vars(1);
+    gfx::pop_vars(2);
     gfx::pop_colors(6);
     gfx::end_child();
     changed
