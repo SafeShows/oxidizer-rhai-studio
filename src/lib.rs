@@ -4,6 +4,7 @@
 //!
 //! - editor.rs: the code editor with syntax colors (highlight.rs colors Rhai) and autocomplete
 //! - debug.rs: breakpoints and the DEBUG panel (Oxidizer pauses the mod)
+//! - inspector.rs: the INSPECT panel (the live game, object by object); watch.rs: WATCH (values and graphs)
 //! - api.rs: what scripts can call, from Oxidizer's definition files; explorer.rs: the API panel
 //! - files.rs: finding Rhai mods, open documents, new mods
 //! - console.rs: the log and the console line
@@ -19,7 +20,9 @@ mod explorer;
 mod files;
 mod gfx;
 mod highlight;
+mod inspector;
 mod theme;
+mod watch;
 
 use console::Console;
 use explorer::Explorer;
@@ -52,17 +55,25 @@ struct Studio {
     /// The console drawer: whether it is open, and its height now (it slides between 0 and DRAWER_HEIGHT).
     drawer_open: bool,
     drawer: f32,
-    /// The API panel on the right.
+    /// The panels on the right (DEBUG opens by itself when a breakpoint is hit).
     api_open: bool,
+    inspect_open: bool,
+    watch_open: bool,
     explorer: Explorer,
     debug: debug::Debug,
+    inspector: inspector::Inspector,
+    watch: watch::Watch,
     frames: u64,
 }
 
 impl Mod for Studio {
     fn init() -> Self {
         log("rhai_studio: F9 opens Rhai Studio");
-        let (visible, drawer_open, api_open) = load_settings();
+        let s = load_settings();
+        let flag = |k: &str, d: bool| s.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
+        let (visible, drawer_open) = (flag("visible", true), flag("console", true));
+        let watches: Vec<String> = s.get("watches").and_then(|v| v.as_array()).into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect();
+        let root = s.get("inspect_root").and_then(|v| v.as_str()).map(String::from);
         std::thread::spawn(api::load);
         Studio {
             visible,
@@ -76,9 +87,13 @@ impl Mod for Studio {
             console: Console::new(),
             drawer_open,
             drawer: if drawer_open { DRAWER_HEIGHT } else { 0.0 },
-            api_open,
+            api_open: flag("api", false),
+            inspect_open: flag("inspect", false),
+            watch_open: flag("watch", false),
             explorer: Explorer::default(),
             debug: debug::Debug::default(),
+            inspector: root.map(|r| inspector::Inspector::new(&r)).unwrap_or_default(),
+            watch: watch::Watch::new(&watches),
             frames: 0,
         }
     }
@@ -109,6 +124,7 @@ impl Mod for Studio {
         if !self.docs.is_empty() {
             self.debug.poll(self.frames);
         }
+        self.watch.sample();
         let target = if self.drawer_open { DRAWER_HEIGHT } else { 0.0 };
         self.drawer += (target - self.drawer) * (dt as f32 * 14.0).min(1.0);
         if (target - self.drawer).abs() < 0.5 {
@@ -132,34 +148,28 @@ impl Mod for Studio {
             self.draw_sidebar();
             gfx::end_child();
             imgui::same_line();
-            // The right column: the DEBUG panel once a breakpoint was hit, the API explorer when open.
+            // The right column: the open panels, as tabs when there are several (DEBUG first: it opens by
+            // itself when a breakpoint is hit).
             let debugging = self.debug.active() || self.debug.problem.is_some();
-            let side = self.api_open || debugging;
-            let main_width = if side { -(EXPLORER_WIDTH + 8.0) } else { 0.0 };
+            let panels: Vec<&str> = [("DEBUG", debugging), ("INSPECT", self.inspect_open), ("WATCH", self.watch_open), ("API", self.api_open)]
+                .into_iter()
+                .filter_map(|(name, open)| open.then_some(name))
+                .collect();
+            let main_width = if panels.is_empty() { 0.0 } else { -(EXPLORER_WIDTH + 8.0) };
             gfx::begin_child("rhai_studio_main", v2(main_width, body), 0, 0);
             self.draw_tabs();
             gfx::end_child();
-            if side {
+            if !panels.is_empty() {
                 imgui::same_line();
                 gfx::begin_child("rhai_studio_side_right", v2(0.0, body), 0, 0);
-                // Both: as tabs, DEBUG first (it opens when a breakpoint is hit).
-                let both = debugging && self.api_open;
-                let tabs = both && imgui::begin_tab_bar("rhai_studio_side_tabs");
-                if debugging && (!both || (tabs && imgui::begin_tab_item("DEBUG", None, 0))) {
-                    gfx::begin_child("rhai_studio_debug", v2(0.0, 0.0), gfx::CHILD_BORDERS, 0);
-                    self.debug.draw();
-                    gfx::end_child();
-                    if both {
-                        imgui::end_tab_item();
+                let several = panels.len() > 1;
+                let tabs = several && imgui::begin_tab_bar("rhai_studio_side_tabs");
+                for name in panels {
+                    if several && !(tabs && imgui::begin_tab_item(name, None, 0)) {
+                        continue;
                     }
-                }
-                if self.api_open && (!both || (tabs && imgui::begin_tab_item("API", None, 0))) {
-                    if let Some(code) = self.explorer.draw()
-                        && let Some(d) = self.active.and_then(|i| self.docs.get_mut(i))
-                    {
-                        d.text.insert(&code);
-                    }
-                    if both {
+                    self.draw_panel(name);
+                    if several {
                         imgui::end_tab_item();
                     }
                 }
@@ -193,10 +203,36 @@ impl Studio {
     }
 
     fn save_settings(&self) {
-        let _ = std::fs::write(
-            config_path("rhai_studio"),
-            format!("visible = {}\nconsole = {}\napi = {}\n", self.visible, self.drawer_open, self.api_open),
-        );
+        let mut t = toml::Table::new();
+        for (k, v) in [("visible", self.visible), ("console", self.drawer_open), ("api", self.api_open), ("inspect", self.inspect_open), ("watch", self.watch_open)] {
+            t.insert(k.into(), v.into());
+        }
+        t.insert("inspect_root".into(), self.inspector.root().into());
+        t.insert("watches".into(), self.watch.exprs().into());
+        let _ = std::fs::write(config_path("rhai_studio"), t.to_string());
+    }
+
+    fn draw_panel(&mut self, name: &str) {
+        match name {
+            "DEBUG" => {
+                gfx::begin_child("rhai_studio_debug", v2(0.0, 0.0), gfx::CHILD_BORDERS, 0);
+                self.debug.draw();
+                gfx::end_child();
+            }
+            "INSPECT" => self.inspector.draw(self.frames),
+            "WATCH" => {
+                if self.watch.draw() {
+                    self.save_settings();
+                }
+            }
+            _ => {
+                if let Some(code) = self.explorer.draw()
+                    && let Some(d) = self.active.and_then(|i| self.docs.get_mut(i))
+                {
+                    d.text.insert(&code);
+                }
+            }
+        }
     }
 
     fn status(&self, id: &str) -> Option<&ModStatus> {
@@ -228,9 +264,16 @@ impl Studio {
             self.drawer_open = !self.drawer_open;
             self.save_settings();
         }
-        imgui::same_line();
-        if theme::toggle_button("API", self.api_open, v2(theme::button_width("API"), h)) {
-            self.api_open = !self.api_open;
+        let (mut toggles, mut changed) = (theme::button_width("CONSOLE"), false);
+        for (label, open) in [("INSPECT", &mut self.inspect_open), ("WATCH", &mut self.watch_open), ("API", &mut self.api_open)] {
+            imgui::same_line();
+            toggles += theme::button_width(label) + 8.0;
+            if theme::toggle_button(label, *open, v2(theme::button_width(label), h)) {
+                *open = !*open;
+                changed = true;
+            }
+        }
+        if changed {
             self.save_settings();
         }
         self.console.poll_log();
@@ -238,7 +281,7 @@ impl Studio {
             && let Some((color, line)) = self.console.last()
         {
             // Folded: the newest line, so nothing goes unseen.
-            gfx::draw_text(v2(pos.x + 36.0 + theme::button_width("CONSOLE") + theme::button_width("API"), y + 6.0), *color, line);
+            gfx::draw_text(v2(pos.x + 28.0 + toggles, y + 6.0), *color, line);
         }
 
         let (save_w, revert_w) = (theme::button_width("SAVE") + 16.0, theme::button_width("REVERT"));
@@ -376,11 +419,9 @@ impl Studio {
     }
 }
 
-/// (window visible, console drawer open, API panel open)
-fn load_settings() -> (bool, bool, bool) {
-    let t = std::fs::read_to_string(config_path("rhai_studio")).ok().and_then(|t| t.parse::<toml::Table>().ok()).unwrap_or_default();
-    let flag = |k: &str, d: bool| t.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
-    (flag("visible", true), flag("console", true), flag("api", false))
+/// Rhai Studio's settings file, as a table (empty when there is none).
+fn load_settings() -> toml::Table {
+    std::fs::read_to_string(config_path("rhai_studio")).ok().and_then(|t| t.parse::<toml::Table>().ok()).unwrap_or_default()
 }
 
 oxidizer_api::oxidizer_mod!(Studio);

@@ -59,6 +59,8 @@ struct Fns {
     mouse_pos: unsafe extern "C" fn() -> V2,
     mouse_clicked: unsafe extern "C" fn(i32, bool) -> bool,
     window_hovered: unsafe extern "C" fn(i32) -> bool,
+    dummy: unsafe extern "C" fn(*const V2),
+    keyboard_focus_here: unsafe extern "C" fn(i32),
 }
 
 fn fns() -> &'static Fns {
@@ -108,6 +110,8 @@ fn fns() -> &'static Fns {
             mouse_pos: sym!("GetMousePos"),
             mouse_clicked: sym!("IsMouseClicked"),
             window_hovered: sym!("IsWindowHovered"),
+            dummy: sym!("Dummy"),
+            keyboard_focus_here: sym!("SetKeyboardFocusHere"),
         };
         std::mem::forget(lib);
         f
@@ -337,4 +341,14 @@ pub fn text_wrapped(s: &str) {
 /// Where the mouse is (screen position), if the left button was clicked this frame over the current window.
 pub fn clicked_at() -> Option<V2> {
     unsafe { ((fns().window_hovered)(0) && (fns().mouse_clicked)(0, false)).then(|| (fns().mouse_pos)()) }
+}
+
+/// Empty space of a size in the layout (after drawing into it by hand).
+pub fn dummy(size: V2) {
+    unsafe { (fns().dummy)(&size) }
+}
+
+/// Gives the keyboard back to the widget just drawn, next frame (a text field after Enter, to type the next line).
+pub fn refocus_last() {
+    unsafe { (fns().keyboard_focus_here)(-1) }
 }

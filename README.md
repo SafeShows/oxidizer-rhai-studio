@@ -18,6 +18,12 @@ and Oxidizer reloads the mod within a second, while you keep flying.
 - **Breakpoints:** click left of a line number to set one. When the mod reaches it, the DEBUG panel shows the
   function's variables, `this` and the call stack, and the mod pauses while the game keeps running; CONTINUE runs
   it again (in `frame`, one frame at a time). Needs Oxidizer 0.11 or later.
+- **Inspector:** the INSPECT button shows the running game object by object: start from any Rhai expression (the
+  controlled vehicle by default), click an object to go into it, UP to come back, and click a number, bool or string
+  that can be set to change it live. Needs Oxidizer 0.12 or later.
+- **Watches:** WATCH evaluates Rhai expressions every frame, shows their values and graphs the numbers
+  (`ksa::Universe::get_elapsed_seconds()`), for tuning an autopilot or seeing what the physics does. The list is
+  kept between games.
 - **Errors:** a mod that fails to load or stops on an error shows the error, with its line, above the editor.
 - **Console:** a drawer that slides up from the CONSOLE button under the editor (folded, the bar shows the newest
   line), with the log as it comes in (your `print()` output too) and a line that runs Rhai against
@@ -43,7 +49,7 @@ Studio's autocomplete and API explorer read the definition files Oxidizer writes
 The editor colors Rhai (keywords, strings, numbers, comments, calls, `ksa::` modules) and numbers its lines. It is
 the game's own ImGui text box underneath, so undo (Ctrl+Z), select all, copy and paste work as usual, and Tab types a
 tab (except when a suggestion is showing). The window is styled like the game's own dialogs: a centered title, section bars over bordered boxes, and a
-footer with the CONSOLE and API toggles, REVERT and an amber SAVE.
+footer with the CONSOLE, INSPECT, WATCH and API toggles, REVERT and an amber SAVE.
 
 ## Build
 
