@@ -32,6 +32,17 @@ and Oxidizer reloads the mod within a second, while you keep flying.
 **F9** or **Mods > Rhai Studio** opens and closes Rhai Studio, and the × in its corner closes it. Closed, it is gone
 until you open it again, with your tabs as you left them.
 
+### Screenshots
+
+| | |
+|---|---|
+| ![Autocomplete: ksa::Program::con offers console_window and controlled_vehicle](docs/screenshots/autocomplete.png) | ![The API explorer: a search with a result's docs and INSERT](docs/screenshots/api-explorer.png) |
+| Autocomplete | API explorer |
+| ![A breakpoint on line 23 with the DEBUG panel](docs/screenshots/breakpoints.png) | ![The INSPECT panel: the controlled vehicle's live members](docs/screenshots/inspector.png) |
+| Breakpoints | Inspector |
+
+![A WATCH expression with its graph](docs/screenshots/watch.png)
+
 ## Install
 
 Needs Oxidizer 0.7.0 or later, as the StarMap mod (`Oxidizer.StarMap`) or standalone; see
