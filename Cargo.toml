@@ -1,6 +1,6 @@
 [package]
 name = "rhai_studio" # also the mod id (its folder in mods/): rename together with mod/mod.toml
-version = "1.3.0"
+version = "2.0.0"
 edition = "2024"
 publish = false
 
@@ -12,3 +12,8 @@ oxidizer_api = "0.4"
 toml = "1.2"
 libloading = "0.9"
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# The tests run the code graphs compile to.
+rhai = { version = "1.27", features = ["sync"] }

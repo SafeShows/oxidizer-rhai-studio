@@ -13,12 +13,16 @@
 //! - this file: the window
 
 mod api;
+mod blueprint;
+mod canvas;
 mod console;
 mod debug;
 mod editor;
 mod explorer;
 mod files;
+mod form;
 mod gfx;
+mod graph;
 mod highlight;
 mod inspector;
 mod theme;
@@ -51,6 +55,8 @@ struct Studio {
     active: Option<usize>,
     new_name: TextBuffer,
     new_error: Option<String>,
+    /// The new mod is a graph.
+    new_graph: bool,
     console: Console,
     /// The console drawer: whether it is open, and its height now (it slides between 0 and DRAWER_HEIGHT).
     drawer_open: bool,
@@ -84,6 +90,7 @@ impl Mod for Studio {
             active: None,
             new_name: TextBuffer::default(),
             new_error: None,
+            new_graph: true,
             console: Console::new(),
             drawer_open,
             drawer: if drawer_open { DRAWER_HEIGHT } else { 0.0 },
@@ -188,15 +195,24 @@ impl Mod for Studio {
         }
         imgui::end();
         theme::pop();
-        if imgui::ctrl_shortcut('s')
-            && let Some(d) = self.active.and_then(|i| self.docs.get_mut(i))
-        {
-            d.save();
+        if imgui::ctrl_shortcut('s') {
+            self.save_active();
         }
     }
 }
 
 impl Studio {
+    /// Saves the tab in front; a graph's breakpoints move with their nodes.
+    fn save_active(&mut self) {
+        let Some(d) = self.active.and_then(|i| self.docs.get_mut(i)) else { return };
+        d.save();
+        if d.error.is_none()
+            && let Some(g) = &mut d.graph
+        {
+            g.saved(&d.title, &mut self.debug);
+        }
+    }
+
     fn toggle(&mut self) {
         self.visible = !self.visible;
         self.save_settings();
@@ -293,16 +309,15 @@ impl Studio {
             d.revert();
         }
         imgui::same_line();
-        if theme::primary_button("SAVE", v2(save_w, h))
-            && let Some(d) = self.active.and_then(|i| self.docs.get_mut(i))
-        {
-            d.save();
+        if theme::primary_button("SAVE", v2(save_w, h)) {
+            self.save_active();
         }
     }
 
     fn draw_sidebar(&mut self) {
         let current = self.active.and_then(|i| self.docs.get(i)).map(|d| d.path.clone());
         let mut to_open = None;
+        let mut add_graph = None;
         if gfx::header("Mods", true) {
             gfx::begin_child("rhai_studio_mods", v2(0.0, 0.0), gfx::CHILD_BORDERS | gfx::CHILD_AUTO_RESIZE_Y, 0);
             for m in &self.mods {
@@ -316,6 +331,14 @@ impl Studio {
                 imgui::text(&m.id);
                 imgui::same_line();
                 imgui::text_colored(MUTED, state);
+                imgui::same_line();
+                if gfx::button_sized(&format!("+##graph_{}", m.id), v2(0.0, 0.0)) {
+                    add_graph = Some(m.id.clone());
+                }
+                if gfx::item_hovered() && gfx::begin_tooltip_at(v2(gfx::mouse_pos().x + 12.0, gfx::mouse_pos().y + 8.0)) {
+                    imgui::text("Add a graph script to this mod");
+                    gfx::end_tooltip();
+                }
                 for f in &m.files {
                     let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     if gfx::selectable(&format!("    {name}##{}", f.display()), current.as_deref() == Some(f.as_path())) {
@@ -331,15 +354,26 @@ impl Studio {
         if let Some((path, id)) = to_open {
             self.open(&path, &id);
         }
+        if let Some(id) = add_graph {
+            match files::new_graph(&id) {
+                Ok(path) => {
+                    log(&format!("rhai_studio: added {} to {id} (runs with Oxidizer 0.14 or later)", path.display()));
+                    self.mods = files::rhai_mods();
+                    self.open(&path, &id);
+                }
+                Err(e) => log(&format!("rhai_studio: {e}")),
+            }
+        }
 
         if gfx::header("New mod", true) {
             gfx::begin_child("rhai_studio_new", v2(0.0, 0.0), gfx::CHILD_BORDERS | gfx::CHILD_AUTO_RESIZE_Y, 0);
             imgui::text("Name");
             gfx::next_width(-f32::MIN_POSITIVE);
             let enter = imgui::input_text("##new_mod", &mut self.new_name, text_flags::ENTER_RETURNS_TRUE);
+            imgui::checkbox("As a graph", &mut self.new_graph);
             if gfx::button_sized("CREATE", v2(-f32::MIN_POSITIVE, 0.0)) || enter {
                 let id = self.new_name.as_str().trim().to_string();
-                match files::new_mod(&id) {
+                match files::new_mod(&id, self.new_graph) {
                     Ok(main) => {
                         log(&format!("rhai_studio: made mods/{id}; Oxidizer starts it within a second"));
                         self.new_name.set("");
@@ -393,6 +427,7 @@ impl Studio {
 
     fn draw_doc(&mut self, i: usize) {
         let status = self.status(&self.docs[i].mod_id).cloned();
+        let frames = self.frames;
         let d = &mut self.docs[i];
         let paused = self.debug.paused_at(&d.title);
         let (color, state) = match &status {
@@ -404,15 +439,32 @@ impl Studio {
         imgui::text_colored(color, &format!("● {state}"));
         imgui::same_line();
         let lines = d.text.as_str().lines().count();
-        imgui::text_colored(MUTED, &format!("  {lines} lines   {}   Ctrl+S saves", if d.dirty() { "modified" } else { "saved" }));
+        imgui::same_line();
+        if d.graph.is_some() {
+            imgui::text_colored(MUTED, &format!("  graph   {}   Ctrl+S saves", if d.dirty() { "modified" } else { "saved" }));
+        } else {
+            imgui::text_colored(MUTED, &format!("  {lines} lines   {}   Ctrl+S saves", if d.dirty() { "modified" } else { "saved" }));
+            imgui::same_line();
+            if gfx::button_sized("CONVERT TO GRAPH", v2(0.0, 0.0)) {
+                d.convert_to_graph();
+            }
+        }
         if let Some(e) = &d.error {
             imgui::text_colored(RED, e);
         }
-        if let Some(p) = status.as_ref().and_then(|s| s.problem.as_deref()) {
+        let problem = status.as_ref().and_then(|s| s.problem.as_deref());
+        if let Some(p) = problem {
             imgui::text_colored(RED, p);
         }
+        if let Some(g) = &mut d.graph {
+            let mut cx = blueprint::Ctx { title: &d.title, debug: &mut self.debug, problem, frames };
+            if let blueprint::Action::DropGraph = g.draw(&mut d.text, &mut cx) {
+                d.drop_graph();
+            }
+            return;
+        }
         let breakpoints = self.debug.breakpoints(&d.title);
-        let marks = editor::Marks { breakpoints: &breakpoints, paused_at: self.debug.paused_at(&d.title) };
+        let marks = editor::Marks { breakpoints: &breakpoints, paused_at: self.debug.paused_at(&d.title), read_only: false };
         if let Some(line) = editor::code_editor("rhai_studio_editor", &mut d.text, v2(0.0, 0.0), &marks) {
             self.debug.toggle(&d.title, line);
         }

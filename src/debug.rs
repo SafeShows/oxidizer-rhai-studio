@@ -53,7 +53,13 @@ impl Debug {
             }
             None => lines.push(line),
         }
+        self.set(source, lines);
+    }
+
+    /// Sets a script's breakpoint lines.
+    pub fn set(&mut self, source: &str, mut lines: Vec<usize>) {
         lines.sort_unstable();
+        lines.dedup();
         let list = lines.iter().map(usize::to_string).collect::<Vec<_>>().join(", ");
         match oxidizer_api::rhai_eval(&format!("debug_breakpoints({}, [{list}])", rhai_str(source))) {
             Ok(_) => self.state["breakpoints"][source] = lines.into(), // until the next poll

@@ -24,6 +24,8 @@ pub struct Item {
     /// "(speed: float, paused: bool) -> ()", ": float" for a property, "" for a module.
     pub sig: String,
     pub doc: String,
+    /// Calling it only reads something: in a graph it is a pure node, without exec pins.
+    pub pure: bool,
 }
 
 impl Item {
@@ -75,12 +77,12 @@ pub fn load() {
     let dir = oxidizer_api::config_path("rhai_studio").with_file_name("definitions");
     let mut items = vec![];
     for k in KEYWORDS {
-        items.push(Item { path: k.to_string(), name: k.to_string(), kind: Kind::Keyword, sig: String::new(), doc: String::new() });
+        items.push(Item { path: k.to_string(), name: k.to_string(), kind: Kind::Keyword, sig: String::new(), doc: String::new(), pure: false });
     }
     // Rhai's operators are left out: nobody completes `+`.
     for file in ["__static__.d.rhai", "__builtin__.d.rhai", "ksa.d.rhai", "brutal.d.rhai"] {
         if let Ok(text) = std::fs::read_to_string(dir.join(file)) {
-            parse(&text, &mut items);
+            parse(&text, &mut items, file == "__builtin__.d.rhai");
         }
     }
     if items.len() == KEYWORDS.len() {
@@ -89,7 +91,8 @@ pub fn load() {
     let _ = INDEX.set(Index::new(items));
 }
 
-fn parse(text: &str, items: &mut Vec<Item>) {
+/// `builtin`: Rhai's own functions (math, strings), which only compute.
+fn parse(text: &str, items: &mut Vec<Item>, builtin: bool) {
     let mut stack: Vec<String> = vec![];
     let mut doc = String::new();
     for line in text.lines().map(str::trim) {
@@ -119,7 +122,7 @@ fn parse(text: &str, items: &mut Vec<Item>) {
         let closes = line.bytes().rev().take_while(|&b| b == b'}').count();
         let body = &line[..line.len() - closes];
         if let Some(f) = body.strip_prefix("fn ").or_else(|| body.strip_prefix("op ")) {
-            items.extend(function(&stack, f, std::mem::take(&mut doc)));
+            items.extend(function(&stack, f, std::mem::take(&mut doc), builtin));
         }
         for _ in 0..closes {
             stack.pop();
@@ -132,11 +135,11 @@ fn parse(text: &str, items: &mut Vec<Item>) {
 
 fn module(stack: &[String], name: &str) -> Item {
     let path = stack.iter().map(String::as_str).chain([name]).collect::<Vec<_>>().join("::");
-    Item { path, name: name.into(), kind: Kind::Module, sig: String::new(), doc: String::new() }
+    Item { path, name: name.into(), kind: Kind::Module, sig: String::new(), doc: String::new(), pure: false }
 }
 
 /// `get altitude(obj: Obj) -> float;`, `create(vehicle: Vehicle) -> AbandonPopup;`, `text(_: string) -> ;`
-fn function(stack: &[String], f: &str, doc: String) -> Option<Item> {
+fn function(stack: &[String], f: &str, doc: String, builtin: bool) -> Option<Item> {
     let f = f.trim_end_matches(';');
     if f.starts_with("set ") {
         return None; // the getter already names it
@@ -167,7 +170,18 @@ fn function(stack: &[String], f: &str, doc: String) -> Option<Item> {
         (false, false) => (Kind::Function, format!("({}){ret}", params.join(", "))),
     };
     let path = if member || stack.is_empty() { name.clone() } else { format!("{}::{name}", stack.join("::")) };
-    Some(Item { path, name, kind, sig, doc })
+    let pure = !ret.is_empty() && (getter || builtin || is_query(&name, params.is_empty()));
+    Some(Item { path, name, kind, sig, doc, pure })
+}
+
+/// Whether a function by this name only reads: `get_altitude`, `is_null`, `to_string`, Oxidizer's readers, or a
+/// game function without arguments that isn't a constructor (`ksa::Program::controlled_vehicle()`).
+fn is_query(name: &str, no_args: bool) -> bool {
+    const READERS: &[&str] = &["float", "len", "is_null", "static_get", "key_down", "key_pressed", "config_get", "save_get", "inspect", "result", "ctrl_shortcut"];
+    const ACTIONS: &[&str] = &["begin", "end", "same_line", "separator", "end_child", "end_menu", "end_tab", "end_tab_bar", "debug_state", "new"];
+    ["get_", "is_", "has_", "can_", "to_", "as_", "find_"].iter().any(|p| name.starts_with(p))
+        || READERS.contains(&name)
+        || (no_args && !name.starts_with("create") && !ACTIONS.contains(&name))
 }
 
 impl Index {
@@ -295,8 +309,8 @@ mod tests {
 
     fn index() -> Index {
         let mut items = vec![];
-        parse(STATIC, &mut items);
-        parse(DEFS, &mut items);
+        parse(STATIC, &mut items, false);
+        parse(DEFS, &mut items, false);
         Index::new(items)
     }
 
@@ -349,7 +363,7 @@ mod real {
         let t = std::time::Instant::now();
         let mut items = vec![];
         for f in ["__static__.d.rhai", "__builtin__.d.rhai", "ksa.d.rhai", "brutal.d.rhai"] {
-            super::parse(&std::fs::read_to_string(dir.join(f)).unwrap(), &mut items);
+            super::parse(&std::fs::read_to_string(dir.join(f)).unwrap(), &mut items, f == "__builtin__.d.rhai");
         }
         let ix = super::Index::new(items);
         eprintln!("{} items in {:?}, {} members", ix.items.len(), t.elapsed(), ix.members.len());

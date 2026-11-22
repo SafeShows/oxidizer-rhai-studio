@@ -183,6 +183,8 @@ fn draw_popup(a: &Assist, pos: V2) {
 pub struct Marks<'a> {
     pub breakpoints: &'a [usize],
     pub paused_at: Option<usize>,
+    /// Shown, not edited (generated code).
+    pub read_only: bool,
 }
 
 /// Draws the editor `size` big (0 = fill, negative = fill except that much). Returns the line number whose gutter
@@ -263,7 +265,10 @@ pub fn code_editor(id: &str, code: &mut Code, size: V2, marks: &Marks) -> Option
     let a = &mut code.assist;
     (a.active, a.seen) = (a.seen, false);
     // ponytail: the outer scroll doesn't follow the cursor when typing past the bottom edge; scroll with the wheel.
-    let flags = text_flags::ALLOW_TAB_INPUT | NO_HORIZONTAL_SCROLL | gfx::INPUT_CALLBACK_ALWAYS;
+    let mut flags = text_flags::ALLOW_TAB_INPUT | NO_HORIZONTAL_SCROLL | gfx::INPUT_CALLBACK_ALWAYS;
+    if marks.read_only {
+        flags |= text_flags::READ_ONLY;
+    }
     gfx::input_text_multiline(&format!("##{id}"), &mut code.buf, v2(width, height), flags, on_frame, a as *mut Assist as *mut c_void);
     gfx::pop_vars(2);
     gfx::pop_colors(6);

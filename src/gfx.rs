@@ -61,6 +61,32 @@ struct Fns {
     window_hovered: unsafe extern "C" fn(i32) -> bool,
     dummy: unsafe extern "C" fn(*const V2),
     keyboard_focus_here: unsafe extern "C" fn(i32),
+    // for the graph editor's canvas
+    get_font: unsafe extern "C" fn() -> *mut c_void,
+    font_size: unsafe extern "C" fn() -> f32,
+    add_text_sized: unsafe extern "C" fn(DrawList, *mut c_void, f32, *const V2, u32, S, S, f32, *const V4),
+    add_bezier: unsafe extern "C" fn(DrawList, *const V2, *const V2, *const V2, *const V2, u32, f32, i32),
+    add_circle_filled: unsafe extern "C" fn(DrawList, *const V2, f32, u32, i32),
+    add_circle: unsafe extern "C" fn(DrawList, *const V2, f32, u32, i32, f32),
+    add_rect: unsafe extern "C" fn(DrawList, *const V2, *const V2, u32, f32, i32, f32),
+    add_triangle_filled: unsafe extern "C" fn(DrawList, *const V2, *const V2, *const V2, u32),
+    mouse_down: unsafe extern "C" fn(i32) -> bool,
+    mouse_double_clicked: unsafe extern "C" fn(i32) -> bool,
+    window_focused: unsafe extern "C" fn(i32) -> bool,
+    invisible_button: unsafe extern "C" fn(S, *const V2, i32) -> bool,
+    item_hovered: unsafe extern "C" fn(i32) -> bool,
+    any_item_active: unsafe extern "C" fn() -> bool,
+    is_key_down: unsafe extern "C" fn(i32) -> bool,
+    open_popup: unsafe extern "C" fn(S, i32),
+    begin_popup: unsafe extern "C" fn(S, i32) -> bool,
+    end_popup: unsafe extern "C" fn(),
+    close_current_popup: unsafe extern "C" fn(),
+    set_scroll_y: unsafe extern "C" fn(f32),
+    set_next_window_content_size: unsafe extern "C" fn(*const V2),
+    get_clipboard: unsafe extern "C" fn() -> S,
+    set_clipboard: unsafe extern "C" fn(S),
+    combo: unsafe extern "C" fn(S, *mut i32, S, i32) -> bool,
+    frame_height: unsafe extern "C" fn() -> f32,
 }
 
 fn fns() -> &'static Fns {
@@ -112,6 +138,31 @@ fn fns() -> &'static Fns {
             window_hovered: sym!("IsWindowHovered"),
             dummy: sym!("Dummy"),
             keyboard_focus_here: sym!("SetKeyboardFocusHere"),
+            get_font: sym!("GetFont"),
+            font_size: sym!("GetFontSize"),
+            add_text_sized: sym!("ImDrawList_AddText_1"),
+            add_bezier: sym!("ImDrawList_AddBezierCubic"),
+            add_circle_filled: sym!("ImDrawList_AddCircleFilled"),
+            add_circle: sym!("ImDrawList_AddCircle"),
+            add_rect: sym!("ImDrawList_AddRect"),
+            add_triangle_filled: sym!("ImDrawList_AddTriangleFilled"),
+            mouse_down: sym!("IsMouseDown"),
+            mouse_double_clicked: sym!("IsMouseDoubleClicked"),
+            window_focused: sym!("IsWindowFocused"),
+            invisible_button: sym!("InvisibleButton"),
+            item_hovered: sym!("IsItemHovered"),
+            any_item_active: sym!("IsAnyItemActive"),
+            is_key_down: sym!("IsKeyDown"),
+            open_popup: sym!("OpenPopup_0"),
+            begin_popup: sym!("BeginPopup"),
+            end_popup: sym!("EndPopup"),
+            close_current_popup: sym!("CloseCurrentPopup"),
+            set_scroll_y: sym!("SetScrollY"),
+            set_next_window_content_size: sym!("SetNextWindowContentSize"),
+            get_clipboard: sym!("GetClipboardText"),
+            set_clipboard: sym!("SetClipboardText"),
+            combo: sym!("Combo_1"),
+            frame_height: sym!("GetFrameHeight"),
         };
         std::mem::forget(lib);
         f
@@ -329,9 +380,14 @@ pub fn end_tooltip() {
 
 /// Text that wraps at the window's edge.
 pub fn text_wrapped(s: &str) {
+    text_wrapped_at(s, 0.0);
+}
+
+/// Text that wraps at `x` pixels from the window's left (in a tooltip, which has no width of its own yet).
+pub fn text_wrapped_at(s: &str, x: f32) {
     let p = s.as_ptr() as S;
     unsafe {
-        (fns().push_text_wrap_pos)(0.0);
+        (fns().push_text_wrap_pos)(x);
         (fns().text_unformatted)(p, p.add(s.len()));
         (fns().pop_text_wrap_pos)();
     }
@@ -351,4 +407,141 @@ pub fn dummy(size: V2) {
 /// Gives the keyboard back to the widget just drawn, next frame (a text field after Enter, to type the next line).
 pub fn refocus_last() {
     unsafe { (fns().keyboard_focus_here)(-1) }
+}
+
+// ---- for the graph editor ----
+
+/// Text at a font size (the canvas zooms), without moving the layout cursor.
+pub fn draw_text_sized(pos: V2, color: [f32; 4], size: f32, s: &str) {
+    let p = s.as_ptr() as S;
+    unsafe { (fns().add_text_sized)((fns().get_window_draw_list)(), (fns().get_font)(), size, &pos, rgba(color), p, p.add(s.len()), 0.0, std::ptr::null()) }
+}
+
+/// The current font's size: what [`text_width`] measures at.
+pub fn font_size() -> f32 {
+    unsafe { (fns().font_size)() }
+}
+
+/// The height of a widget with a frame (a button, a text field).
+pub fn frame_height() -> f32 {
+    unsafe { (fns().frame_height)() }
+}
+
+pub fn draw_bezier(p: [V2; 4], color: [f32; 4], thickness: f32) {
+    unsafe { (fns().add_bezier)((fns().get_window_draw_list)(), &p[0], &p[1], &p[2], &p[3], rgba(color), thickness, 0) }
+}
+
+pub fn draw_circle(c: V2, r: f32, color: [f32; 4], filled: bool) {
+    let dl = unsafe { (fns().get_window_draw_list)() };
+    unsafe {
+        if filled {
+            (fns().add_circle_filled)(dl, &c, r, rgba(color), 0)
+        } else {
+            (fns().add_circle)(dl, &c, r, rgba(color), 0, 1.5)
+        }
+    }
+}
+
+/// A rectangle's outline.
+pub fn draw_frame(min: V2, max: V2, color: [f32; 4], rounding: f32, thickness: f32) {
+    unsafe { (fns().add_rect)((fns().get_window_draw_list)(), &min, &max, rgba(color), rounding, 0, thickness) }
+}
+
+pub fn draw_triangle(a: V2, b: V2, c: V2, color: [f32; 4]) {
+    unsafe { (fns().add_triangle_filled)((fns().get_window_draw_list)(), &a, &b, &c, rgba(color)) }
+}
+
+pub fn mouse_pos() -> V2 {
+    unsafe { (fns().mouse_pos)() }
+}
+
+// Mouse buttons.
+pub const LEFT: i32 = 0;
+pub const RIGHT: i32 = 1;
+
+pub fn mouse_clicked(button: i32) -> bool {
+    unsafe { (fns().mouse_clicked)(button, false) }
+}
+
+pub fn mouse_down(button: i32) -> bool {
+    unsafe { (fns().mouse_down)(button) }
+}
+
+pub fn mouse_double_clicked(button: i32) -> bool {
+    unsafe { (fns().mouse_double_clicked)(button) }
+}
+
+/// Whether the current window (or a child of it) has the keyboard: it was clicked last.
+pub fn window_focused() -> bool {
+    unsafe { (fns().window_focused)(1) } // ImGuiFocusedFlags_ChildWindows
+}
+
+/// An area that takes presses of every mouse button without drawing anything, so dragging in it doesn't drag the
+/// window. True when left-clicked.
+pub fn invisible_button(id: &str, size: V2) -> bool {
+    unsafe { (fns().invisible_button)(c(id).as_ptr(), &size, 1 | 2 | 4) }
+}
+
+/// Whether the mouse is over the widget just drawn (and no popup covers it).
+pub fn item_hovered() -> bool {
+    unsafe { (fns().item_hovered)(0) }
+}
+
+/// Whether a widget is in use (typed into, dragged): keys then belong to it.
+pub fn any_item_active() -> bool {
+    unsafe { (fns().any_item_active)() }
+}
+
+pub const MOD_CTRL: i32 = 1 << 12;
+pub const MOD_SHIFT: i32 = 1 << 13;
+pub const MOD_ALT: i32 = 1 << 14;
+pub const KEY_DELETE: i32 = 522;
+pub const KEY_ESCAPE: i32 = 526;
+/// ImGuiKey_A; the letters follow in order.
+pub const KEY_A: i32 = 546;
+
+pub fn key_down(key: i32) -> bool {
+    unsafe { (fns().is_key_down)(key) }
+}
+
+pub fn open_popup(id: &str) {
+    unsafe { (fns().open_popup)(c(id).as_ptr(), 0) }
+}
+
+/// A popup window opened with [`open_popup`]; call [`end_popup`] when this returns true.
+pub fn begin_popup(id: &str) -> bool {
+    unsafe { (fns().begin_popup)(c(id).as_ptr(), 0) }
+}
+
+pub fn end_popup() {
+    unsafe { (fns().end_popup)() }
+}
+
+pub fn close_popup() {
+    unsafe { (fns().close_current_popup)() }
+}
+
+pub fn set_scroll_y(y: f32) {
+    unsafe { (fns().set_scroll_y)(y) }
+}
+
+/// The size of the next child window's content: how far it can scroll.
+pub fn next_content_size(size: V2) {
+    unsafe { (fns().set_next_window_content_size)(&size) }
+}
+
+pub fn clipboard() -> String {
+    let p = unsafe { (fns().get_clipboard)() };
+    if p.is_null() { String::new() } else { unsafe { std::ffi::CStr::from_ptr(p) }.to_string_lossy().into_owned() }
+}
+
+pub fn set_clipboard(s: &str) {
+    unsafe { (fns().set_clipboard)(c(s).as_ptr()) }
+}
+
+/// A drop-down list; `current` is the chosen index. True when it changed.
+pub fn combo(label: &str, current: &mut i32, items: &[&str]) -> bool {
+    let mut list: Vec<u8> = items.iter().flat_map(|i| i.replace('\0', "").into_bytes().into_iter().chain([0])).collect();
+    list.extend([0, 0]);
+    unsafe { (fns().combo)(c(label).as_ptr(), current, list.as_ptr() as S, -1) }
 }

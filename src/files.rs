@@ -1,6 +1,8 @@
 //! The Rhai mods in the game's mods folder, open documents, and making a new mod.
 
+use crate::blueprint;
 use crate::editor::Code;
+use crate::graph::Graph;
 use oxidizer_api::mods_dir;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -54,6 +56,8 @@ pub struct Doc {
     saved: String,
     on_disk: Option<SystemTime>,
     pub error: Option<String>,
+    /// The graph editor, when the file is a graph script.
+    pub graph: Option<Box<blueprint::Editor>>,
 }
 
 impl Doc {
@@ -67,6 +71,7 @@ impl Doc {
             saved: String::new(),
             on_disk: None,
             error: None,
+            graph: None,
         };
         d.revert();
         d
@@ -94,12 +99,37 @@ impl Doc {
         match fs::read_to_string(&self.path) {
             Ok(t) => {
                 self.text.set(&t);
-                self.saved = t;
                 self.on_disk = modified(&self.path);
-                self.error = None;
+                (self.graph, self.error) = match blueprint::Editor::load(&t, &self.stem()) {
+                    Ok(g) => (g.map(Box::new), None),
+                    Err(e) => (None, Some(format!("{e}: showing it as code"))),
+                };
+                self.saved = t;
             }
             Err(e) => self.error = Some(format!("could not read: {e}")),
         }
+    }
+
+    /// The file's name without `.rhai`.
+    pub fn stem(&self) -> String {
+        self.path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+    }
+
+    /// Turns a script into a graph: its code goes into a Script Code node (save to keep it).
+    pub fn convert_to_graph(&mut self) {
+        let mut g = Graph::empty();
+        let id = g.new_id();
+        g.sheets[0].nodes.push(crate::graph::Node::new(id, "script", [40.0, 40.0], &[("code", self.text.as_str())]));
+        let ed = blueprint::Editor::new(g, &self.stem());
+        self.text.set(&ed.file());
+        self.graph = Some(Box::new(ed));
+    }
+
+    /// Keeps the hand-edited code of a graph script: it becomes a plain script (save to keep it).
+    pub fn drop_graph(&mut self) {
+        let code = crate::graph::strip(self.text.as_str()).to_string();
+        self.text.set(&code);
+        self.graph = None;
     }
 
     /// Picks up a change made outside the game (in another editor), unless this tab has unsaved edits.
@@ -131,9 +161,9 @@ fn gui(dt) {
 }
 "#;
 
-/// Makes `mods/<id>/` with a `mod.toml` and a starter `main.rhai`; returns the script's path.
-/// Oxidizer starts new script mods by itself while the game runs.
-pub fn new_mod(id: &str) -> Result<PathBuf, String> {
+/// Makes `mods/<id>/` with a `mod.toml` and a starter `main.rhai` (a script, or a graph); returns the script's
+/// path. Oxidizer starts new script mods by itself while the game runs.
+pub fn new_mod(id: &str, graph: bool) -> Result<PathBuf, String> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
         return Err("Use letters, digits, '_' and '-' only.".into());
     }
@@ -143,7 +173,58 @@ pub fn new_mod(id: &str) -> Result<PathBuf, String> {
     }
     let main = dir.join("main.rhai");
     let made = fs::create_dir_all(&dir)
-        .and_then(|()| fs::write(&main, STARTER.replace("{id}", id)))
+        .and_then(|()| fs::write(&main, if graph { blueprint::Editor::new(Graph::starter(id), "main").file() } else { STARTER.replace("{id}", id) }))
         .and_then(|()| fs::write(dir.join("mod.toml"), format!("name = \"{id}\"\n\n[oxidizer]\nscript = \"main.rhai\"\n")));
     made.map(|()| main).map_err(|e| format!("could not create mods/{id}: {e}"))
+}
+
+/// Adds a graph script to a mod (`graph.rhai`, `graph2.rhai`, ...), listed in its mod.toml's `scripts` so
+/// Oxidizer (0.14+) runs it with the main script. Returns its path.
+pub fn new_graph(mod_id: &str) -> Result<PathBuf, String> {
+    let dir = mods_dir().join(mod_id);
+    let name = (1..).map(|n| if n == 1 { "graph.rhai".to_string() } else { format!("graph{n}.rhai") }).find(|n| !dir.join(n).exists()).unwrap();
+    let path = dir.join(&name);
+    let toml_path = dir.join("mod.toml");
+    let text = fs::read_to_string(&toml_path).map_err(|e| format!("could not read mods/{mod_id}/mod.toml: {e}"))?;
+    let updated = add_script(&text, &name).ok_or_else(|| format!("mods/{mod_id}/mod.toml has no [oxidizer] section"))?;
+    let stem = name.trim_end_matches(".rhai");
+    fs::write(&path, blueprint::Editor::new(Graph::empty(), stem).file()).map_err(|e| format!("could not create {name}: {e}"))?;
+    fs::write(&toml_path, updated).map_err(|e| format!("could not update mod.toml: {e}"))?;
+    Ok(path)
+}
+
+/// mod.toml with `file` added to `[oxidizer] scripts`, changing as little of the text as it can.
+fn add_script(text: &str, file: &str) -> Option<String> {
+    let mut table: toml::Table = text.parse().ok()?;
+    let ox = table.get_mut("oxidizer")?.as_table_mut()?;
+    let mut scripts: Vec<String> = ox.get("scripts").and_then(|v| v.as_array()).into_iter().flatten().filter_map(|v| v.as_str().map(String::from)).collect();
+    scripts.push(file.into());
+    let line = format!("scripts = [{}]", scripts.iter().map(|s| format!("{s:?}")).collect::<Vec<_>>().join(", "));
+    let lines: Vec<&str> = text.lines().collect();
+    let key = |l: &&str, k: &str| l.trim_start().strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('='));
+    if let Some(i) = lines.iter().position(|l| key(l, "scripts")) {
+        if lines[i].contains(']') {
+            let mut out = lines.clone();
+            out[i] = &line;
+            return Some(out.join("\n") + "\n");
+        }
+        ox.insert("scripts".into(), toml::Value::Array(scripts.into_iter().map(toml::Value::from).collect()));
+        return Some(table.to_string()); // a list over several lines: written anew
+    }
+    let at = lines.iter().position(|l| key(l, "script")).or_else(|| lines.iter().position(|l| l.trim() == "[oxidizer]"))?;
+    let mut out = lines.clone();
+    out.insert(at + 1, &line);
+    Some(out.join("\n") + "\n")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn adds_scripts_to_mod_toml() {
+        let t = "name = \"m\"\n\n[oxidizer]\nscript = \"main.rhai\" # main\n";
+        assert_eq!(super::add_script(t, "graph.rhai").unwrap(), "name = \"m\"\n\n[oxidizer]\nscript = \"main.rhai\" # main\nscripts = [\"graph.rhai\"]\n");
+        let t2 = super::add_script(t, "graph.rhai").unwrap();
+        assert!(super::add_script(&t2, "graph2.rhai").unwrap().contains("scripts = [\"graph.rhai\", \"graph2.rhai\"]"));
+        assert!(super::add_script("name = 1\n", "g.rhai").is_none());
+    }
 }
