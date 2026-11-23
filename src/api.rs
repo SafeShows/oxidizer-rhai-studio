@@ -2,7 +2,7 @@
 //! for editors (`<documents>/oxidizer/definitions/*.d.rhai`): the game as `ksa::` and `brutal::` modules, the
 //! game objects' properties and methods, Oxidizer's functions and Rhai's own.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::OnceLock;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -58,6 +58,15 @@ pub struct Index {
     children: HashMap<String, Vec<usize>>,
     /// What can follow a dot: game object members and Rhai's methods, one per name.
     members: Vec<usize>,
+    /// The game's C# types by full name ("KSA.Universe"), with their members' C# names: what `patch`,
+    /// `static_call` and friends take as strings.
+    pub types: BTreeMap<String, GameType>,
+}
+
+#[derive(Default)]
+pub struct GameType {
+    pub methods: BTreeSet<String>,
+    pub props: BTreeSet<String>,
 }
 
 const KEYWORDS: &[&str] = &[
@@ -184,7 +193,63 @@ fn is_query(name: &str, no_args: bool) -> bool {
         || (no_args && !name.starts_with("create") && !ACTIONS.contains(&name))
 }
 
+/// The C# types and members the items' docs name: "`KSA.Universe.ApplyVehicleSolvers`" (static, full type
+/// name, "(static field)" / "(static property)" for data) and "the game method `Stage` on Vehicle, Part" (instance
+/// members, by the types' short names).
+fn game_types(items: &[Item]) -> BTreeMap<String, GameType> {
+    let mut types: BTreeMap<String, GameType> = BTreeMap::new();
+    let docs = || items.iter().filter_map(|it| it.doc.lines().next());
+    for d in docs() {
+        let Some(inner) = d.strip_prefix('`').and_then(|r| r.split('`').next()) else { continue };
+        let Some((ty, member)) = inner.rsplit_once('.') else { continue };
+        if inner.contains(' ') || !ty.contains('.') {
+            continue;
+        }
+        let t = types.entry(ty.to_string()).or_default();
+        if member == "new" {
+            continue; // a constructor: the type is enough
+        }
+        if d.contains("(static field)") || d.contains("(static property)") {
+            t.props.insert(member.into());
+        } else {
+            t.methods.insert(member.into());
+        }
+    }
+    let mut short: HashMap<String, Vec<String>> = HashMap::new();
+    for full in types.keys() {
+        let name = full.rsplit(['.', '+']).next().unwrap_or(full);
+        short.entry(name.to_string()).or_default().push(full.clone());
+    }
+    for d in docs() {
+        let (prop, rest) = match (d.strip_prefix("the game method `"), d.strip_prefix("the game property or field `")) {
+            (Some(r), _) => (false, r),
+            (_, Some(r)) => (true, r),
+            _ => continue,
+        };
+        let Some((member, on)) = rest.split_once("` on ") else { continue };
+        for t in on.split(", ").map(str::trim) {
+            for full in short.get(t).cloned().unwrap_or_else(|| vec![t.to_string()]) {
+                let e = types.entry(full).or_default();
+                if prop { e.props.insert(member.into()) } else { e.methods.insert(member.into()) };
+            }
+        }
+    }
+    types
+}
+
 impl Index {
+    /// Methods (or properties and fields) of a C# type ("KSA.Universe", also "KSA.Universe, KSA"); of all types
+    /// when it isn't known.
+    pub fn members_of(&self, ty: &str, methods: bool) -> Vec<String> {
+        fn pick(t: &GameType, methods: bool) -> &BTreeSet<String> {
+            if methods { &t.methods } else { &t.props }
+        }
+        match self.types.get(ty.split(',').next().unwrap_or("").trim()) {
+            Some(t) => pick(t, methods).iter().cloned().collect(),
+            None => self.types.values().flat_map(|t| pick(t, methods)).cloned().collect::<BTreeSet<_>>().into_iter().collect(),
+        }
+    }
+
     fn new(items: Vec<Item>) -> Index {
         let mut children: HashMap<String, Vec<usize>> = HashMap::new();
         let mut members = vec![];
@@ -200,7 +265,8 @@ impl Index {
                 children.entry(parent).or_default().push(i);
             }
         }
-        Index { items, children, members }
+        let types = game_types(&items);
+        Index { items, children, members, types }
     }
 
     /// Suggestions for the code before the cursor on its line: (length of the word being completed, items).
@@ -344,6 +410,18 @@ mod tests {
     }
 
     #[test]
+    fn game_types() {
+        let mut items = vec![];
+        parse("module ksa;\n\nmodule Universe {\n/// `KSA.Universe.ApplyVehicleSolvers`\nfn apply_vehicle_solvers() -> ();\n/// `KSA.Universe.Speed` (static field)\nfn speed() -> float;}\n", &mut items, false);
+        parse(STATIC, &mut items, false);
+        let ix = Index::new(items);
+        assert_eq!(ix.members_of("KSA.Universe, KSA", true), ["ApplyVehicleSolvers"]);
+        assert_eq!(ix.members_of("KSA.Universe", false), ["Speed"]);
+        assert_eq!(ix.members_of("Vehicle", true), ["Stage"]); // only known by its short name
+        assert!(ix.members_of("", false).contains(&"Altitude".to_string()));
+    }
+
+    #[test]
     fn searches() {
         let ix = index();
         let paths = |q: &str| ix.search(q).into_iter().map(|i| ix.items[i].path.clone()).collect::<Vec<_>>();
@@ -367,6 +445,8 @@ mod real {
         }
         let ix = super::Index::new(items);
         eprintln!("{} items in {:?}, {} members", ix.items.len(), t.elapsed(), ix.members.len());
+        let u = ix.members_of("KSA.Universe", true);
+        eprintln!("{} game types; KSA.Universe has {} methods, ApplyVehicleSolvers: {}; Vehicle methods {}", ix.types.len(), u.len(), u.contains(&"ApplyVehicleSolvers".to_string()), ix.members_of("KSA.Vehicle", true).len());
         for q in ["ksa::Program::con", "v.get_bar", "static_", "pri", "ksa::Universe::", "brutal::im_gui_api::"] {
             let (w, s) = ix.complete(q, &[]);
             eprintln!("{q:?} word {w}: {:?}", s.iter().take(6).map(|s| format!("{}{}", s.name, s.sig)).collect::<Vec<_>>());

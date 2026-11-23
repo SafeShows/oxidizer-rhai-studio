@@ -553,6 +553,12 @@ impl Editor {
                 }
             } else {
                 edit(&key, &format!("{} ({})", p.label, p.ty), fields, &mut n2);
+                if let Some(options) = canvas::arg_options(&self.graph, &n2, &p.name) {
+                    let mut v = n2.get(&key).to_string();
+                    if canvas::suggestions(&key, &mut v, &options) {
+                        n2.data.insert(key, v);
+                    }
+                }
             }
         }
         if !sh.pure() {

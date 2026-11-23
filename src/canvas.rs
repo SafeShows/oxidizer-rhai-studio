@@ -21,6 +21,8 @@ const HEADER: f32 = 24.0;
 const ROW: f32 = 22.0;
 const PIN_R: f32 = 5.0;
 const LITERAL_W: f32 = 64.0;
+/// Longest value shown in a node's value box, in characters (the rest is in the details).
+const LITERAL_CHARS: usize = 16;
 const MIN_W: f32 = 110.0;
 const COMMENT_HEADER: f32 = 26.0;
 /// How far the canvas can scroll up and down, for the wheel.
@@ -191,6 +193,66 @@ fn typeable(ty: &str) -> bool {
     matches!(ty, "bool" | "int" | "float" | "string" | "any" | "array" | "map")
 }
 
+/// Values to pick from for a string input of a call: game types for `type_name`, the chosen type's methods
+/// or members, prefix/postfix for a patch's `kind`, this graph's functions for `function`.
+pub fn arg_options(g: &Graph, n: &Node, pin: &str) -> Option<Vec<String>> {
+    if n.kind != "api" {
+        return None;
+    }
+    let path = n.get("path");
+    let ix = api::index()?;
+    let ty = n.get("in.type_name");
+    match pin {
+        "type_name" => Some(ix.types.keys().cloned().collect()),
+        "method" => Some(ix.members_of(ty, true)),
+        "member" => Some(ix.members_of(ty, false)),
+        "kind" if path == "patch" => Some(vec!["prefix".into(), "postfix".into()]),
+        "function" => {
+            let mut f: Vec<String> = g.sheets.iter().skip(1).map(|s| s.name.clone()).collect();
+            for s in g.sheets.iter().flat_map(|s| &s.nodes).filter(|n| n.kind == "script") {
+                f.extend(s.get("code").split("fn ").skip(1).filter_map(|r| r.split('(').next()).map(|n| n.trim().to_string()).filter(|n| !n.is_empty()));
+            }
+            Some(f)
+        }
+        _ => None,
+    }
+}
+
+/// Rows of the options that match what is typed, under a field (the best first); true when one was clicked,
+/// which `value` then is.
+pub fn suggestions(id: &str, value: &mut String, options: &[String]) -> bool {
+    if options.iter().any(|o| o == value) {
+        return false;
+    }
+    let q = value.trim().to_lowercase();
+    let last = |o: &str| o.rsplit(['.', '+']).next().unwrap_or(o).to_lowercase();
+    let mut hits: Vec<&String> = options.iter().filter(|o| o.to_lowercase().contains(&q)).collect();
+    hits.sort_by_key(|o| (last(o) != q, !last(o).starts_with(&q), !o.to_lowercase().starts_with(&q), o.len()));
+    for (i, o) in hits.iter().take(8).enumerate() {
+        if gfx::selectable(&format!("  {o}##{id}_s{i}"), false) {
+            *value = o.to_string();
+            return true;
+        }
+    }
+    if hits.len() > 8 {
+        imgui::text_colored(theme::MUTED, &format!("  {} more: keep typing", hits.len() - 8));
+    } else if hits.is_empty() && !options.is_empty() {
+        imgui::text_colored(theme::MUTED, "  no match");
+    }
+    false
+}
+
+/// What a value box on a node shows: the typed value, shortened.
+fn shown(n: &Node, pin: &str, ty: &str) -> String {
+    let v = n.get(&format!("in.{pin}"));
+    if ty == "bool" { if v == "true" { "☑ true".into() } else { "☐ false".into() } } else { trunc(v, LITERAL_CHARS) }
+}
+
+/// A value box's width: its text, at least LITERAL_W.
+fn box_width(text: &str) -> f32 {
+    (gfx::text_width(text) + 10.0).max(LITERAL_W)
+}
+
 fn trunc(s: &str, n: usize) -> String {
     if s.chars().count() > n { format!("{}…", s.chars().take(n - 1).collect::<String>()) } else { s.to_string() }
 }
@@ -313,7 +375,7 @@ impl Canvas {
         let wired = |p: &str| links.iter().any(|l| l.to == n.id && l.inp == p);
         let code: Vec<String> = if matches!(n.kind.as_str(), "custom" | "expr" | "script") { n.get("code").lines().take(8).map(|l| trunc(l, 48)).collect() } else { vec![] };
         let tw = gfx::text_width;
-        let ins_w = sh.ins.iter().map(|p| 18.0 + tw(&p.label) + if typeable(&p.ty) && !wired(&p.name) { LITERAL_W + 8.0 } else { 0.0 }).fold(0.0, f32::max);
+        let ins_w = sh.ins.iter().map(|p| 18.0 + tw(&p.label) + if typeable(&p.ty) && !wired(&p.name) { box_width(&shown(n, &p.name, &p.ty)) + 8.0 } else { 0.0 }).fold(0.0, f32::max);
         let outs_w = sh.outs.iter().map(|p| 18.0 + tw(&p.label)).fold(0.0, f32::max);
         let code_w = code.iter().map(|l| tw(l) + 20.0).fold(0.0, f32::max);
         let w = (tw(&sh.title) + 34.0).max(ins_w + outs_w + 16.0).max(code_w).max(MIN_W);
@@ -330,7 +392,7 @@ impl Canvas {
             .map(|(i, p)| {
                 (typeable(&p.ty) && !wired(&p.name)).then(|| {
                     let x = min.x + (16.0 + tw(&p.label) + 6.0) * z;
-                    (v2(x, row_y(i) - 8.0 * z), v2(x + LITERAL_W * z, row_y(i) + 8.0 * z))
+                    (v2(x, row_y(i) - 8.0 * z), v2(x + box_width(&shown(n, &p.name, &p.ty)) * z, row_y(i) + 8.0 * z))
                 })
             })
             .collect();
@@ -488,9 +550,7 @@ impl Canvas {
                     Self::text(v2(at.x + 12.0 * z, at.y - 8.0 * z), theme::TEXT, z, &p.label);
                     if let Some((bmin, bmax)) = l.boxes[i] {
                         gfx::draw_rect(bmin, bmax, theme::FIELD, 3.0 * z);
-                        let v = n.get(&format!("in.{}", p.name));
-                        let shown = if p.ty == "bool" { if v == "true" { "☑ true" } else { "☐ false" } } else { v };
-                        Self::text(v2(bmin.x + 4.0 * z, bmin.y + 1.0 * z), theme::AMBER, z, &trunc(shown, 9));
+                        Self::text(v2(bmin.x + 4.0 * z, bmin.y + 1.0 * z), theme::AMBER, z, &shown(n, &p.name, &p.ty));
                         if hovered && inside(mouse, bmin, bmax) {
                             box_hit = Some((*id, p.name.clone(), p.ty.clone()));
                         }
@@ -821,7 +881,16 @@ impl Canvas {
                 if !gfx::any_item_active() {
                     imgui::set_keyboard_focus_here(0);
                 }
-                let done = imgui::input_text("##literal", &mut self.edit, text_flags::ENTER_RETURNS_TRUE);
+                let mut done = imgui::input_text("##literal", &mut self.edit, text_flags::ENTER_RETURNS_TRUE);
+                let pin = key.trim_start_matches("in.");
+                let options = g.sheets[sheet].nodes.iter().find(|n| n.id == id).and_then(|n| arg_options(g, n, pin));
+                if let Some(options) = options {
+                    let mut v = self.edit.as_str().to_string();
+                    if suggestions("literal", &mut v, &options) {
+                        self.edit.set(&v);
+                        done = true;
+                    }
+                }
                 if let Some(n) = g.sheets[sheet].nodes.iter_mut().find(|n| n.id == id)
                     && n.get(&key) != self.edit.as_str()
                 {
